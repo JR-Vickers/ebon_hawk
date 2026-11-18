@@ -30,7 +30,7 @@ def run(args, *, godot=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["run", "editor", "check", "native", "native-check", "platform-check"])
+    parser.add_argument("command", choices=["run", "editor", "check", "native", "native-check", "platform-check", "mouse-fixture"])
     args = parser.parse_args()
     config_path = ROOT / "config/local.json"
     config = json.loads(config_path.read_text()) if config_path.exists() else {}
@@ -64,6 +64,10 @@ def main():
              "-DCMAKE_BUILD_TYPE=Debug", "-DCMAKE_OSX_ARCHITECTURES=arm64",
              "-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0", f"-DPython3_EXECUTABLE={python}"])
         run([cmake, "--build", build / "native", "--parallel", "8"])
+    elif args.command == "mouse-fixture":
+        run(["xcrun", "clang++", "-std=c++17", "-fobjc-arc", "-arch", "arm64", "-mmacosx-version-min=15.0",
+             "-Wall", "-Wextra", "-Werror", "tests/mouse_fixture.mm", "-framework", "Foundation",
+             "-framework", "AppKit", "-o", build / "mouse_fixture"])
     elif args.command == "platform-check":
         run(["xcrun", "clang++", "-std=c++17", "-fobjc-arc", "-arch", "arm64", "-mmacosx-version-min=15.0",
              "-Wall", "-Wextra", "-Werror", "native/src/session.mm", "tests/platform.mm",
