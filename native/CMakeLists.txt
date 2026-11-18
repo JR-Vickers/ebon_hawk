@@ -13,6 +13,8 @@ FetchContent_Declare(godot_cpp
 )
 set(GODOTCPP_TARGET template_debug CACHE STRING "" FORCE)
 set(GODOTCPP_PRECISION single CACHE STRING "" FORCE)
+# Keep our warnings enabled without reporting unused parameters in dependency headers.
+set(GODOTCPP_SYSTEM_HEADERS ON CACHE BOOL "" FORCE)
 set(GODOTCPP_BUILD_PROFILE "${CMAKE_CURRENT_SOURCE_DIR}/build_profile.json" CACHE PATH "" FORCE)
 FetchContent_MakeAvailable(godot_cpp)
 
