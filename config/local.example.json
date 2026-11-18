@@ -1,0 +1,5 @@
+{
+  "godot": "/Applications/Godot.app/Contents/MacOS/Godot",
+  "cmake": "/opt/homebrew/bin/cmake",
+  "python": "/opt/homebrew/bin/python3.12"
+}

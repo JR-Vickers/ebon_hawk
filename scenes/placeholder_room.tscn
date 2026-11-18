@@ -1,0 +1,139 @@
+[gd_scene load_steps=14 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/player.tscn" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/console.tscn" id="2"]
+
+[ext_resource type="Script" path="res://scripts/console_controller.gd" id="3"]
+
+[sub_resource type="StandardMaterial3D" id="FloorMaterial"]
+albedo_color = Color(0.17, 0.19, 0.22, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="WallMaterial"]
+albedo_color = Color(0.29, 0.33, 0.37, 1)
+roughness = 0.9
+
+[sub_resource type="Environment" id="Environment"]
+background_mode = 1
+background_color = Color(0.03, 0.04, 0.06, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.75, 0.84, 1, 1)
+ambient_light_energy = 0.65
+
+[sub_resource type="BoxMesh" id="FloorMesh"]
+material = SubResource("FloorMaterial")
+size = Vector3(12, 0.4, 12)
+
+[sub_resource type="BoxShape3D" id="FloorShape"]
+size = Vector3(12, 0.4, 12)
+
+[sub_resource type="BoxMesh" id="SideMesh"]
+material = SubResource("WallMaterial")
+size = Vector3(0.4, 4, 12)
+
+[sub_resource type="BoxShape3D" id="SideShape"]
+size = Vector3(0.4, 4, 12)
+
+[sub_resource type="BoxMesh" id="EndMesh"]
+material = SubResource("WallMaterial")
+size = Vector3(12, 4, 0.4)
+
+[sub_resource type="BoxShape3D" id="EndShape"]
+size = Vector3(12, 4, 0.4)
+
+[sub_resource type="BoxMesh" id="CeilingMesh"]
+material = SubResource("WallMaterial")
+size = Vector3(12, 0.2, 12)
+
+[node name="PlaceholderRoom" type="Node3D"]
+
+[node name="ConsoleController" type="Node" parent="."]
+script = ExtResource("3")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment")
+
+[node name="Light" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-60, -30, 0)
+light_energy = 0.8
+
+[node name="Floor" type="StaticBody3D" parent="."]
+position = Vector3(0, -0.2, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Floor"]
+mesh = SubResource("FloorMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Floor"]
+shape = SubResource("FloorShape")
+
+[node name="LeftWall" type="StaticBody3D" parent="."]
+position = Vector3(-6, 2, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="LeftWall"]
+mesh = SubResource("SideMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="LeftWall"]
+shape = SubResource("SideShape")
+
+[node name="RightWall" type="StaticBody3D" parent="."]
+position = Vector3(6, 2, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="RightWall"]
+mesh = SubResource("SideMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RightWall"]
+shape = SubResource("SideShape")
+
+[node name="BackWall" type="StaticBody3D" parent="."]
+position = Vector3(0, 2, 6)
+
+[node name="Mesh" type="MeshInstance3D" parent="BackWall"]
+mesh = SubResource("EndMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="BackWall"]
+shape = SubResource("EndShape")
+
+[node name="FrontWall" type="StaticBody3D" parent="."]
+position = Vector3(0, 2, -6)
+
+[node name="Mesh" type="MeshInstance3D" parent="FrontWall"]
+mesh = SubResource("EndMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="FrontWall"]
+shape = SubResource("EndShape")
+
+[node name="Ceiling" type="MeshInstance3D" parent="."]
+position = Vector3(0, 4.1, 0)
+mesh = SubResource("CeilingMesh")
+
+[node name="Console" parent="." instance=ExtResource("2")]
+position = Vector3(0, 0, -3)
+
+[node name="Spawn" type="Marker3D" parent="."]
+position = Vector3(0, 0.05, 3)
+
+[node name="Player" parent="." instance=ExtResource("1")]
+position = Vector3(0, 0.05, 3)
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Instructions" type="Label" parent="HUD"]
+offset_left = 24.0
+offset_top = 20.0
+text = "EBON HAWK DESKTOP / M0
+WASD move | Mouse look | Esc release mouse | Click resume
+R reset to spawn | Cmd+Q quit
+Placeholder console only; desktop integration starts in M1."
+theme_override_font_sizes/font_size = 20
+
+[node name="Crosshair" type="Label" parent="HUD"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -5.0
+offset_top = -12.0
+offset_right = 5.0
+offset_bottom = 12.0
+text = "+"

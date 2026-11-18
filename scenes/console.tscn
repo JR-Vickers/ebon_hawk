@@ -1,0 +1,46 @@
+[gd_scene load_steps=6 format=3]
+
+[sub_resource type="StandardMaterial3D" id="Housing"]
+albedo_color = Color(0.16, 0.21, 0.25, 1)
+roughness = 0.8
+
+[sub_resource type="BoxMesh" id="Base"]
+material = SubResource("Housing")
+size = Vector3(2.2, 1.1, 0.8)
+
+[sub_resource type="BoxShape3D" id="Collision"]
+size = Vector3(2.2, 2.1, 0.8)
+
+[sub_resource type="StandardMaterial3D" id="ScreenMaterial"]
+albedo_color = Color(0.025, 0.12, 0.16, 1)
+shading_mode = 0
+
+[sub_resource type="QuadMesh" id="Screen"]
+material = SubResource("ScreenMaterial")
+size = Vector2(2.0, 1.0)
+
+[node name="Console" type="StaticBody3D"]
+metadata/console_id = "placeholder_console_01"
+
+[node name="Base" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.55, 0)
+mesh = SubResource("Base")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+position = Vector3(0, 1.05, 0)
+shape = SubResource("Collision")
+
+[node name="Screen" type="MeshInstance3D" parent="."]
+position = Vector3(0, 1.6, 0.41)
+mesh = SubResource("Screen")
+
+[node name="Status" type="Label3D" parent="."]
+position = Vector3(0, 1.6, 0.42)
+text = "CONSOLE 01\nM0 FOUNDATION\nNo source assigned"
+font_size = 44
+pixel_size = 0.0025
+modulate = Color(0.4, 0.95, 1, 1)
+outline_size = 0
+
+[node name="ViewPose" type="Marker3D" parent="."]
+position = Vector3(0, 1.6, 2)
