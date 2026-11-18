@@ -32,3 +32,11 @@ static func surface_uv(camera: Camera3D, screen: Node3D, point: Vector2) -> Vect
 		return Vector2(-1, -1)
 	var local: Vector3 = screen.to_local(hit)
 	return Vector2(local.x / 2.0 + 0.5, 0.5 - local.y)
+
+# Project a desktop point onto the captured image. Extending UV outside the
+# target lets the pointer cross the bezel continuously while bounds reject clicks.
+static func console_pointer(camera: Camera3D, screen: Node3D, desktop: Vector2, window: Rect2, content: Vector2) -> Vector2:
+	var uv := (desktop - window.position) / window.size
+	var fitted := fitted_rect(Vector2(2, 1), content)
+	var point := fitted.position + fitted.size * uv
+	return camera.unproject_position(screen.to_global(Vector3(point.x - 1.0, 0.5 - point.y, 0)))

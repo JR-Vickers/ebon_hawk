@@ -5,12 +5,21 @@
 #import <CoreMedia/CoreMedia.h>
 #import <CoreVideo/CoreVideo.h>
 #include "input_ledger.hpp"
+#include "event_routing.hpp"
 #include <atomic>
 #include <mutex>
 #include <thread>
 #include <cmath>
 
-static constexpr int64_t EH_TAG = 0x45424f4e4841574b;
+// Optional WindowServer SPI. A normal CGDisplayHideCursor request loses
+// effect when the captured application becomes frontmost.
+extern "C" {
+int _CGSDefaultConnection(void) __attribute__((weak_import));
+CGError CGSCopyConnectionProperty(int, int, CFStringRef, CFTypeRef *) __attribute__((weak_import));
+CGError CGSSetConnectionProperty(int, int, CFStringRef, CFTypeRef) __attribute__((weak_import));
+}
+static CFStringRef backgroundCursorKey() { return CFSTR("SetsCursorInBackground"); }
+
 static double now() { return NSProcessInfo.processInfo.systemUptime; }
 static NSArray *rectArray(CGRect r) { return @[@(r.origin.x), @(r.origin.y), @(r.size.width), @(r.size.height)]; }
 static bool nearRect(CGRect a, CGRect b) {
@@ -47,6 +56,7 @@ static bool axRect(AXUIElementRef element, CGRect &rect) {
     AXUIElementRef _axApp, _axWindow;
     NSDictionary *_frame;
     NSString *_state, *_message;
+    NSString *_releaseReason;
     std::atomic<NSUInteger> _generation;
     BOOL _refreshing;
     double _lastRefresh, _lastSample, _focusDeadline;
@@ -57,24 +67,41 @@ static bool axRect(AXUIElementRef element, CGRect &rect) {
     NSMutableArray<EHEvent *> *_queued;
     NSMutableDictionary<NSNumber *, EHEvent *> *_pending;
     uint64_t _token;
+    uint64_t _pointerPosted, _pointerRejected, _pointerDirect;
     CGPoint _lastTarget;
+    CGPoint _entryCursor;
+    bool _restoreEntryCursor, _desktopCursorHidden;
+    int _cursorConnection;
+    bool _restoreCursorProperty;
+    id _previousCursorProperty;
     CGSize _capturedSize;
+    size_t _captureWidth, _captureHeight;
+    double _captureScale, _captureContentScale;
+    BOOL _focusMatch;
     NSWindow *_godotWindow;
     NSWindowLevel _previousLevel;
     BOOL _previousHides;
     NSWindowCollectionBehavior _previousBehavior;
-    CFMachPortRef _tap;
+    CFMachPortRef _tap, _clickObserver;
+    NSString *_clickTrace[2];
+    CGEventTimestamp _clickTime[2];
+    bool _clickSeen[2];
     CFRunLoopRef _tapLoop;
     std::thread _tapThread;
     unsigned _releaseKey;
     pid_t _targetPID;
 }
+- (void)observeClick:(CGEventType)type event:(CGEventRef)event;
 - (void)releaseInput:(NSString *)reason;
 - (CGEventRef)handleType:(CGEventType)type event:(CGEventRef)event;
 @end
 
 static CGEventRef tapCallback(CGEventTapProxy, CGEventType type, CGEventRef event, void *context) {
     @autoreleasepool { return [(__bridge EHSession *)context handleType:type event:event]; }
+}
+static CGEventRef observeCallback(CGEventTapProxy, CGEventType type, CGEventRef event, void *context) {
+    @autoreleasepool { [(__bridge EHSession *)context observeClick:type event:event]; }
+    return event;
 }
 static void watchdog(CFRunLoopTimerRef, void *context) {
     EHSession *session = (__bridge EHSession *)context;
@@ -86,9 +113,19 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
 - (instancetype)init {
     if ((self=[super init])) {
         _windows=@[]; _state=@"unassigned"; _message=@"Choose a window with P near the console.";
+        _releaseReason=@"";
         _queued=[NSMutableArray new]; _pending=[NSMutableDictionary new];
     }
     return self;
+}
+- (void)observeClick:(CGEventType)type event:(CGEventRef)event {
+    if (type!=kCGEventLeftMouseDown && type!=kCGEventLeftMouseUp) return;
+    if (!event || CGEventGetIntegerValueField(event,kCGEventSourceUserData)!=EH_EVENT_TAG) return;
+    int phase=type==kCGEventLeftMouseUp;
+    @synchronized(self) {
+        if (_clickTime[phase] && CGEventGetTimestamp(event)==_clickTime[phase])
+            _clickSeen[phase]=true;
+    }
 }
 - (NSDictionary *)permissions {
     return @{@"capture": @(CGPreflightScreenCaptureAccess()), @"accessibility": @(AXIsProcessTrusted()),
@@ -233,7 +270,9 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
         @synchronized(self) {
             if (stream!=_stream) return;
             _lastSample=now(); _state=@"live";
+            if ([_message isEqualToString:@"Starting single-window capture…"]) _message=@"Capture live.";
             _capturedSize=CGSizeMake(content.size.width/contentScale,content.size.height/contentScale);
+            _captureWidth=width; _captureHeight=height; _captureScale=scale; _captureContentScale=contentScale;
             _frame=@{@"width":@(width), @"height":@(height), @"rgba":rgba,
                 @"content_pixels":rectArray(pixels), @"scale_factor":@(scale), @"content_scale":@(contentScale),
                 @"timestamp":@(CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample)))};
@@ -258,9 +297,10 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
     return YES;
 }
 - (BOOL)targetFocused {
-    if (!_axWindow || !AXIsProcessTrusted() || NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier!=_targetPID) return NO;
+    if (!_axWindow || !AXIsProcessTrusted() || NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier!=_targetPID) { _focusMatch=NO; return NO; }
     id focused=axCopy(_axApp,kAXFocusedWindowAttribute);
-    return focused && CFEqual((__bridge CFTypeRef)focused,_axWindow) && ![axCopy(_axWindow,kAXMinimizedAttribute) boolValue];
+    _focusMatch=focused && CFEqual((__bridge CFTypeRef)focused,_axWindow) && ![axCopy(_axWindow,kAXMinimizedAttribute) boolValue];
+    return _focusMatch;
 }
 - (BOOL)beginInteraction:(uint64_t)nativeWindow releaseKey:(unsigned)key {
     [self endInteraction];
@@ -273,6 +313,7 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
     _godotWindow=(__bridge NSWindow *)(void *)nativeWindow;
     if (!_godotWindow || ![NSApp.windows containsObject:_godotWindow]) { _godotWindow=nil; @synchronized(self) { _message=@"No standalone Godot NSWindow. Launch with tools/dev.py run (not embedded editor play)."; } return NO; }
     _releaseKey=(key==111 ? 111 : 62);
+    _pointerPosted=0; _pointerRejected=0; _pointerDirect=0;
     _previousLevel=_godotWindow.level; _previousHides=_godotWindow.hidesOnDeactivate;
     _previousBehavior=_godotWindow.collectionBehavior;
     _godotWindow.collectionBehavior=(_previousBehavior & ~NSWindowCollectionBehaviorMoveToActiveSpace) |
@@ -286,6 +327,29 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
         CGEventMaskBit(kCGEventLeftMouseDragged)|CGEventMaskBit(kCGEventRightMouseDragged)|CGEventMaskBit(kCGEventOtherMouseDragged)|CGEventMaskBit(kCGEventScrollWheel);
     _tap=CGEventTapCreate(kCGSessionEventTap,kCGHeadInsertEventTap,kCGEventTapOptionDefault,mask,tapCallback,(__bridge void *)self);
     if (!_tap) { @synchronized(self) { _message=@"Cannot create input event tap. Check Accessibility/Input Monitoring, restart Godot, and retry."; } [self endInteraction]; return NO; }
+    // Start the desktop cursor at the console's initial aim point once.
+    // Subsequent events already carry target-space Quartz coordinates.
+    CGEventRef cursor=CGEventCreate(nullptr);
+    if (cursor) {
+        _entryCursor=CGEventGetLocation(cursor);
+        CFRelease(cursor);
+        CGRect bounds=_selected.frame;
+        _restoreEntryCursor=CGWarpMouseCursorPosition(CGPointMake(CGRectGetMidX(bounds),
+            CGRectGetMidY(bounds)))==kCGErrorSuccess;
+    }
+    if (_CGSDefaultConnection && CGSCopyConnectionProperty && CGSSetConnectionProperty) {
+        _cursorConnection=_CGSDefaultConnection();
+        CFTypeRef previous=nullptr;
+        CGSCopyConnectionProperty(_cursorConnection,_cursorConnection,backgroundCursorKey(),&previous);
+        _previousCursorProperty=CFBridgingRelease(previous);
+        _restoreCursorProperty=CGSSetConnectionProperty(_cursorConnection,_cursorConnection,
+            backgroundCursorKey(),kCFBooleanTrue)==kCGErrorSuccess;
+    }
+    _desktopCursorHidden=CGDisplayHideCursor(CGMainDisplayID())==kCGErrorSuccess;
+    for (int i=0;i<2;++i) { _clickTrace[i]=nil; _clickSeen[i]=false; }
+    CGEventMask clicks=CGEventMaskBit(kCGEventLeftMouseDown)|CGEventMaskBit(kCGEventLeftMouseUp);
+    _clickObserver=CGEventTapCreate(kCGAnnotatedSessionEventTap,kCGTailAppendEventTap,
+        kCGEventTapOptionListenOnly,clicks,observeCallback,(__bridge void *)self);
     _active=true;
     _tapThread=std::thread([self] {
         @autoreleasepool {
@@ -293,11 +357,15 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
             { std::lock_guard<std::mutex> lock(_inputMutex); _tapLoop=loop; }
             CFRunLoopSourceRef source=CFMachPortCreateRunLoopSource(kCFAllocatorDefault,_tap,0);
             CFRunLoopAddSource(loop,source,kCFRunLoopCommonModes);
+            CFRunLoopSourceRef observerSource=_clickObserver ?
+                CFMachPortCreateRunLoopSource(kCFAllocatorDefault,_clickObserver,0) : nullptr;
+            if (observerSource) CFRunLoopAddSource(loop,observerSource,kCFRunLoopCommonModes);
             CFRunLoopTimerContext context={0,(__bridge void *)self,nullptr,nullptr,nullptr};
             CFRunLoopTimerRef timer=CFRunLoopTimerCreate(nullptr,CFAbsoluteTimeGetCurrent()+0.25,0.25,0,0,watchdog,&context);
             CFRunLoopAddTimer(loop,timer,kCFRunLoopCommonModes);
             if (_active) CFRunLoopRun();
             CFRunLoopTimerInvalidate(timer); CFRelease(timer);
+            if (observerSource) { CFRunLoopSourceInvalidate(observerSource); CFRelease(observerSource); }
             CFRunLoopSourceInvalidate(source); CFRelease(source);
             { std::lock_guard<std::mutex> lock(_inputMutex); _tapLoop=nullptr; }
             CFRelease(loop);
@@ -313,22 +381,36 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
 - (void)releaseInput:(NSString *)reason {
     _active=false;
     std::lock_guard<std::mutex> lock(_inputMutex);
+    if (_restoreEntryCursor) {
+        CGWarpMouseCursorPosition(_entryCursor);
+        _restoreEntryCursor=false;
+    }
+    if (_desktopCursorHidden) {
+        CGDisplayShowCursor(CGMainDisplayID());
+        _desktopCursorHidden=false;
+    }
+    if (_restoreCursorProperty) {
+        CFTypeRef previous=_previousCursorProperty ? (__bridge CFTypeRef)_previousCursorProperty : kCFBooleanFalse;
+        CGSSetConnectionProperty(_cursorConnection,_cursorConnection,backgroundCursorKey(),previous);
+        _restoreCursorProperty=false;
+    }
+    _previousCursorProperty=nil;
     auto releases=_held.drain();
     for (unsigned key:releases.keys) {
         CGEventRef e=CGEventCreateKeyboardEvent(nullptr,(CGKeyCode)key,false);
         if (key==54 || key==55 || key==56 || key==60 || key==58 || key==61 || key==59 || key==62 || key==63)
             CGEventSetType(e,kCGEventFlagsChanged);
-        CGEventSetFlags(e,0); CGEventSetIntegerValueField(e,kCGEventSourceUserData,EH_TAG);
+        CGEventSetFlags(e,0); ehMarkTargetProcess(e,_targetPID);
         CGEventPostToPid(_targetPID,e); CFRelease(e);
     }
     for (unsigned button:releases.buttons) {
         CGEventType type=button==0?kCGEventLeftMouseUp:(button==1?kCGEventRightMouseUp:kCGEventOtherMouseUp);
         CGEventRef e=CGEventCreateMouseEvent(nullptr,type,_lastTarget,(CGMouseButton)button);
-        CGEventSetFlags(e,0); CGEventSetIntegerValueField(e,kCGEventSourceUserData,EH_TAG);
+        CGEventSetFlags(e,0); ehMarkTargetProcess(e,_targetPID);
         CGEventPostToPid(_targetPID,e); CFRelease(e);
     }
     [_queued removeAllObjects]; [_pending removeAllObjects];
-    @synchronized(self) { _message=reason; }
+    @synchronized(self) { _message=reason; _releaseReason=reason ?: @""; }
 }
 - (void)endInteraction {
     NSString *reason;
@@ -342,6 +424,7 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
         CFRunLoopWakeUp(loop); CFRelease(loop);
     }
     if (_tapThread.joinable()) _tapThread.join();
+    if (_clickObserver) { CFMachPortInvalidate(_clickObserver); CFRelease(_clickObserver); _clickObserver=nullptr; }
     if (_tap) { CFMachPortInvalidate(_tap); CFRelease(_tap); _tap=nullptr; }
     if (_godotWindow) {
         _godotWindow.level=_previousLevel; _godotWindow.hidesOnDeactivate=_previousHides;
@@ -351,7 +434,7 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
     }
 }
 - (CGEventRef)handleType:(CGEventType)type event:(CGEventRef)event {
-    if (event && CGEventGetIntegerValueField(event,kCGEventSourceUserData)==EH_TAG) return event;
+    if (event && CGEventGetIntegerValueField(event,kCGEventSourceUserData)==EH_EVENT_TAG) return event;
     if (!_active) return event;
     if (type==kCGEventTapDisabledByTimeout || type==kCGEventTapDisabledByUserInput || now()-_heartbeat.load()>1.5) {
         [self releaseInput:@"Input tap disabled or Godot stalled; held input released."]; return event;
@@ -382,16 +465,9 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
     for (EHEvent *item in _queued) {
         CGEventType type=CGEventGetType(item.event);
         BOOL key=type==kCGEventKeyDown || type==kCGEventKeyUp || type==kCGEventFlagsChanged;
-        CGPoint p=CGEventGetLocation(item.event);
-        double mainHeight=CGDisplayBounds(CGMainDisplayID()).size.height;
-        NSPoint screen=NSMakePoint(p.x,mainHeight-p.y);
-        NSPoint window=[_godotWindow convertPointFromScreen:screen];
-        NSView *view=_godotWindow.contentView;
-        NSPoint local=[view convertPoint:window fromView:nil];
-        double y=view.isFlipped?local.y:view.bounds.size.height-local.y;
+        CGPoint point=CGEventGetLocation(item.event);
         [_pending setObject:item forKey:@(item.token)];
-        [result addObject:@{@"id":@(item.token),@"key":@(key),@"x":@(local.x),@"y":@(y),
-            @"view_width":@(view.bounds.size.width),@"view_height":@(view.bounds.size.height)}];
+        [result addObject:@{@"id":@(item.token),@"key":@(key),@"x":@(point.x),@"y":@(point.y)}];
     }
     [_queued removeAllObjects];
     return result;
@@ -408,14 +484,60 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
     if (!_active || !item) return NO;
     CGEventRef e=item.event; CGEventType type=CGEventGetType(e);
     bool keyboard=type==kCGEventKeyDown || type==kCGEventKeyUp || type==kCGEventFlagsChanged;
+    bool pidDelivery=keyboard;
     if (!keyboard) {
         unsigned button=(unsigned)CGEventGetIntegerValueField(e,kCGMouseEventButtonNumber);
         bool up=type==kCGEventLeftMouseUp || type==kCGEventRightMouseUp || type==kCGEventOtherMouseUp;
-        if (up && !_held.buttons.count(button)) return NO;
+        bool drag=type==kCGEventLeftMouseDragged || type==kCGEventRightMouseDragged || type==kCGEventOtherMouseDragged;
+        bool held=_held.buttons.count(button)!=0;
         bool inside=std::isfinite(x) && std::isfinite(y) && CGRectContainsPoint(bounds,CGPointMake(x,y));
-        if (!inside && !(up && _held.buttons.count(button))) return NO;
-        if (inside) _lastTarget=CGPointMake(x,y);
-        CGEventSetLocation(e,_lastTarget);
+        bool unmatched=(up || drag) && !held;
+        if (unmatched || (!inside && !(up && held))) {
+            ++_pointerRejected;
+            if (type==kCGEventLeftMouseDown || type==kCGEventLeftMouseUp) {
+                @synchronized(self) {
+                    if (!up) _clickTrace[1]=nil;
+                    _clickTime[up]=0;
+                    _clickSeen[up]=false;
+                    _clickTrace[up]=[NSString stringWithFormat:@"%@ #%llu rejected (%@)",
+                        up ? @"Up" : @"Down",eventID,unmatched ? @"no held button" : @"outside content"];
+                }
+            }
+            return NO;
+        }
+        CGPoint destination=inside ? CGPointMake(x,y) : _lastTarget;
+        NSPoint screenPoint=NSMakePoint(destination.x,CGDisplayBounds(CGMainDisplayID()).size.height-destination.y);
+        NSInteger hit=[NSWindow windowNumberAtPoint:screenPoint belowWindowWithWindowNumber:0];
+        bool overlayHit=hit==_godotWindow.windowNumber;
+        if (overlayHit) {
+            // The frontmost hit can still name our floating overlay. Only
+            // look beneath it when this session owns mouse passthrough.
+            if (_godotWindow.ignoresMouseEvents)
+                hit=[NSWindow windowNumberAtPoint:screenPoint belowWindowWithWindowNumber:_godotWindow.windowNumber];
+        }
+        if (!inside || hit!=_selected.windowID) {
+            // Desktop routing could hit another window. Deliver the mapped
+            // event directly to the already verified target process instead.
+            pidDelivery=true;
+            ++_pointerDirect;
+        }
+        if (type==kCGEventLeftMouseDown || type==kCGEventLeftMouseUp) {
+            NSString *owner=hit==0 ? @"none" : @"unknown";
+            if (hit==_godotWindow.windowNumber) owner=@"Godot";
+            else for (SCWindow *window in _windows) {
+                if (window.windowID==hit) { owner=window.owningApplication.applicationName ?: owner; break; }
+            }
+            @synchronized(self) {
+                if (!up) _clickTrace[1]=nil;
+                _clickTime[up]=CGEventGetTimestamp(e);
+                _clickSeen[up]=false;
+                _clickTrace[up]=[NSString stringWithFormat:@"%@ #%llu %@ | %@ %ld (%@), selected %u | (%.0f, %.0f)",
+                    up ? @"Up" : @"Down",eventID,pidDelivery ? @"direct" : @"session",
+                    overlayHit ? @"beneath Godot" : @"hit",(long)hit,owner,_selected.windowID,destination.x,destination.y];
+            }
+        }
+        _lastTarget=destination;
+        if (!inside) CGEventSetLocation(e,_lastTarget);
         // The original physical event pointed at Godot; never retain its hit-window IDs.
         CGEventSetIntegerValueField(e,kCGMouseEventWindowUnderMousePointer,_selected.windowID);
         CGEventSetIntegerValueField(e,kCGMouseEventWindowUnderMousePointerThatCanHandleThisEvent,_selected.windowID);
@@ -432,8 +554,13 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
     for (auto pair : {std::pair<unsigned,CGEventFlags>{55,kCGEventFlagMaskCommand}, {56,kCGEventFlagMaskShift},
                      {58,kCGEventFlagMaskAlternate}, {59,kCGEventFlagMaskControl}, {63,kCGEventFlagMaskSecondaryFn}})
         _held.key(pair.first,(flags & pair.second)!=0);
-    CGEventSetIntegerValueField(e,kCGEventSourceUserData,EH_TAG);
-    CGEventPostToPid(_targetPID,e);
+    ehMarkTargetProcess(e,_targetPID);
+    if (!keyboard) ++_pointerPosted;
+    if (pidDelivery) {
+        CGEventPostToPid(_targetPID,e);
+    } else {
+        CGEventPost(kCGSessionEventTap,e);
+    }
     return YES;
 }
 - (NSDictionary *)status {
@@ -443,20 +570,32 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
     if (_active && !CGPreflightScreenCaptureAccess()) [self releaseInput:@"Screen Recording permission revoked."];
     @synchronized(self) {
         if (_selected && _lastSample>0 && now()-_lastSample>3 && [_state isEqual:@"live"]) {
-            _state=@"stalled"; // Release outside synchronized block to preserve lock order.
+            _state=@"unavailable"; // Release outside synchronized block to preserve lock order.
         }
     }
-    BOOL stalled; @synchronized(self) { stalled=[_state isEqual:@"stalled"]; }
-    if (stalled && _active) [self releaseInput:@"No recent capture; input released. Restore/reselect source."];
+    BOOL unavailable; @synchronized(self) { unavailable=[_state isEqual:@"unavailable"] && _lastSample>0 && now()-_lastSample>3; }
+    if (unavailable && _active) [self releaseInput:@"No recent capture; input released. Restore/reselect source."];
     @synchronized(self) {
-        return @{@"state":_state,@"message":_message,@"interacting":@(_active.load()),
-            @"window_id":@(_selected.windowID),@"label":_selected ? [NSString stringWithFormat:@"%@ — %@",_selected.owningApplication.applicationName,_selected.title ?: @"Untitled"] : @"No source",
-            @"window_rect":rectArray(_selected.frame),@"sample_age":@(_lastSample>0?now()-_lastSample:-1)};
+        NSMutableArray *trace=[NSMutableArray new];
+        for (int i=0;i<2;++i) {
+            if (!_clickTrace[i]) continue;
+            if (!_clickTime[i]) { [trace addObject:_clickTrace[i]]; continue; }
+            NSString *observation=_clickSeen[i] ? @"seen" :
+                (_clickObserver && CGEventTapIsEnabled(_clickObserver) ? @"unseen" : @"unavailable");
+            [trace addObject:[NSString stringWithFormat:@"%@ | downstream %@",_clickTrace[i],observation]];
+        }
+        return @{@"click_trace":[trace componentsJoinedByString:@"\n"],@"state":_state,@"message":_message,@"interacting":@(_active.load()),
+            @"window_id":@(_selected.windowID),@"window_pid":@(_selected.owningApplication.processID),
+            @"label":_selected ? [NSString stringWithFormat:@"%@ — %@",_selected.owningApplication.applicationName,_selected.title ?: @"Untitled"] : @"No source",
+            @"window_rect":rectArray(_selected.frame),@"sample_age":@(_lastSample>0?now()-_lastSample:-1),
+            @"focus_match":@(_focusMatch),@"capture_width":@(_captureWidth),@"capture_height":@(_captureHeight),
+            @"capture_scale":@(_captureScale),@"capture_content_scale":@(_captureContentScale),@"release_reason":_releaseReason ?: @"",
+            @"pointer_direct":@(_pointerDirect),@"pointer_posted":@(_pointerPosted),@"pointer_rejected":@(_pointerRejected)};
     }
 }
 - (void)stop {
     [self endInteraction]; ++_generation;
-    SCStream *stream; @synchronized(self) { stream=_stream; _stream=nil; _frame=nil; _state=@"unassigned"; _lastSample=0; _capturedSize=CGSizeZero; }
+    SCStream *stream; @synchronized(self) { stream=_stream; _stream=nil; _frame=nil; _state=@"unassigned"; _lastSample=0; _capturedSize=CGSizeZero; _captureWidth=0; _captureHeight=0; _captureScale=0; _captureContentScale=0; _focusMatch=NO; }
     [stream stopCaptureWithCompletionHandler:^(NSError *) {}];
     if (_axWindow) { CFRelease(_axWindow); _axWindow=nullptr; }
     if (_axApp) { CFRelease(_axApp); _axApp=nullptr; }

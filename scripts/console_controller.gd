@@ -10,8 +10,14 @@ var texture: ImageTexture
 var material: ShaderMaterial
 var content_pixels := Rect2()
 var camera_before := Transform3D.IDENTITY
+var mouse_passthrough_before := false
+var camera_fov_before := 75.0
 var selected_label := "No source assigned"
 var source_state := "unassigned"
+var click_trace := ""
+var pointer_direct := 0
+var pointer_posted := 0
+var pointer_rejected := 0
 var last_message := ""
 var last_native_message := ""
 var refresh_clock: float = 0.0
@@ -55,6 +61,7 @@ func _build_ui() -> void:
 	canvas.add_child(hint)
 	pointer = Label.new()
 	pointer.text = "+"
+	pointer.modulate = Color.ORANGE
 	pointer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	pointer.visible = false
 	canvas.add_child(pointer)
@@ -163,13 +170,19 @@ func _enter_console() -> void:
 	player.controls_locked = true
 	player.set_navigation(false)
 	camera_before = camera.global_transform
+	camera_fov_before = camera.fov
+	camera.fov = 45.0
 	camera.global_transform = console.get_node("ViewPose").global_transform
 	var handle: int = DisplayServer.window_get_native_handle(DisplayServer.WINDOW_HANDLE)
+	mouse_passthrough_before = DisplayServer.window_get_flag(DisplayServer.WINDOW_FLAG_MOUSE_PASSTHROUGH)
 	if native.begin_interaction(handle, release_key):
+		DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_MOUSE_PASSTHROUGH, true)
 		mode = Mode.INTERACTING
+		pointer.position = get_viewport().get_visible_rect().size * 0.5 - pointer.size * 0.5
 		pointer.show()
 	else:
 		camera.global_transform = camera_before
+		camera.fov = camera_fov_before
 		player.controls_locked = false
 		last_message = native.status().message
 
@@ -177,7 +190,9 @@ func _leave_console() -> void:
 	if native != null:
 		native.end_interaction()
 	if mode == Mode.INTERACTING:
+		DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_MOUSE_PASSTHROUGH, mouse_passthrough_before)
 		camera.global_transform = camera_before
+		camera.fov = camera_fov_before
 		mode = Mode.NAVIGATION
 		player.controls_locked = false
 		player.set_navigation(false)
@@ -189,12 +204,20 @@ func _process(delta: float) -> void:
 	if native != null:
 		var state: Dictionary = native.status()
 		source_state = state.state
+		if state.click_trace != click_trace:
+			click_trace = state.click_trace
+			if not click_trace.is_empty():
+				print(click_trace)
+		pointer_direct = state.pointer_direct
+		pointer_posted = state.pointer_posted
+		pointer_rejected = state.pointer_rejected
 		selected_label = state.label
 		if state.message != last_native_message:
 			last_native_message = state.message
 			last_message = state.message
 		if mode == Mode.INTERACTING and not state.interacting:
 			var message: String = state.message
+			print("Interaction ended: ", message)
 			_leave_console()
 			last_message = message
 			if message == "quit requested":
@@ -204,17 +227,17 @@ func _process(delta: float) -> void:
 			_update_frame(frame)
 		if mode == Mode.INTERACTING:
 			for event: Dictionary in native.poll_input():
-				var uv := Vector2(-1, -1)
-				if not event.key and event.view_width > 0 and event.view_height > 0:
-					var position := Vector2(event.x / event.view_width, event.y / event.view_height) * get_viewport().get_visible_rect().size
-					pointer.position = position - Vector2(5, 12)
-					uv = Mapping.normalized(Mapping.surface_uv(camera, screen, position), content_pixels.size)
-				var target_point := Vector2(INF, INF)
-				if uv.x >= 0 and uv.y >= 0:
-					var window: Array = state.window_rect
-					target_point = Mapping.native_point(Mapping.capture_pixel(uv, content_pixels), content_pixels, Rect2(window[0], window[1], window[2], window[3]))
-				# Invalid points drop downs/motion; native still releases a held button on up.
-				if not native.forward_event(event.id, target_point):
+				var target_point := Vector2(event.x, event.y)
+				if not event.key:
+					var bounds: Array = state.window_rect
+					var window := Rect2(bounds[0], bounds[1], bounds[2], bounds[3])
+					if window.has_area() and content_pixels.has_area():
+						var position := Mapping.console_pointer(camera, screen, target_point, window, content_pixels.size)
+						pointer.position = position - pointer.size * 0.5
+					else:
+						target_point = Vector2(INF, INF)
+				var forwarded: bool = native.forward_event(event.id, target_point)
+				if not forwarded:
 					if not native.status().interacting:
 						break
 		refresh_clock += delta
@@ -255,11 +278,13 @@ func _update_frame(frame: Dictionary) -> void:
 
 func _update_hint() -> void:
 	if mode == Mode.INTERACTING:
-		hint.text = "%s | %s\nINTERACTING — %s / Esc releases; Cmd+Q quits Godot" % [selected_label, source_state, "Right Control" if release_key == 62 else "F12"]
+		hint.text = "%s | %s\nINTERACTING — %s / Esc releases; Cmd+Q quits Godot\nPointer events posted: %d (%d direct) | not posted: %d" % [selected_label, source_state, "Right Control" if release_key == 62 else "F12", pointer_posted, pointer_direct, pointer_rejected] + "\n" + click_trace
 	else:
 		hint.text = "%s | %s\n%s" % [selected_label, source_state, last_message]
 
 func _exit_tree() -> void:
+	if mode == Mode.INTERACTING:
+		DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_MOUSE_PASSTHROUGH, mouse_passthrough_before)
 	if native != null:
 		native.stop()
 		native = null

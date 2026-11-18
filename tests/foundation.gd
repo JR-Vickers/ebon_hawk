@@ -38,7 +38,9 @@ func run() -> void:
 	Input.action_release("move_back")
 	expect(player.position.z > 5.3 and player.position.z < 5.51, "Back wall contains player")
 	player.reset_to_spawn()
+	Input.action_press("move_forward")
 	player.notification(Node.NOTIFICATION_APPLICATION_FOCUS_OUT)
+	expect(not Input.is_action_pressed("move_forward"), "Focus loss clears stale navigation actions")
 	var start: Vector3 = player.position
 	Input.action_press("move_forward")
 	await frames(60)

@@ -1,8 +1,14 @@
 #import "../native/src/session.h"
+#include "../native/src/event_routing.hpp"
 #include "../native/src/input_ledger.hpp"
 #include <cassert>
 #include <cstdio>
 int main() {
+    CGEventRef routed = CGEventCreate(nullptr);
+    assert(routed);
+    ehMarkTargetProcess(routed, 4242);
+    assert(CGEventGetIntegerValueField(routed, kCGEventTargetUnixProcessID) == 4242);
+    CFRelease(routed);
     EHInputLedger state;
     state.key(56,true); state.key(0,true); state.key(0,true);
     state.button(0,true); state.button(1,true); state.button(1,false);

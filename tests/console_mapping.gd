@@ -33,6 +33,17 @@ func ray_checks() -> void:
 	camera.global_transform = room.get_node("Console/ViewPose").global_transform
 	var center: Vector2 = camera.unproject_position(screen.global_position)
 	expect(Mapping.surface_uv(camera, screen, center).is_equal_approx(Vector2(0.5, 0.5)), "Camera ray intersects screen center")
+	var window := Rect2(-1000, 220, 900, 600)
+	var content := Vector2(1350, 900)
+	for uv: Vector2 in [Vector2(0.001, 0.45), Vector2(0.5, 0.999), Vector2(0.8, 0.2)]:
+		var desktop := window.position + uv * window.size
+		var drawn := Mapping.console_pointer(camera, screen, desktop, window, content)
+		var back := Mapping.normalized(Mapping.surface_uv(camera, screen, drawn), content)
+		expect(back.distance_to(uv) < 0.0001, "Desktop point projects onto its captured pixel")
+	var edge := window.position + window.size * Vector2(0.5, 1)
+	var before := Mapping.console_pointer(camera, screen, edge - Vector2.DOWN, window, content)
+	var after := Mapping.console_pointer(camera, screen, edge + Vector2.DOWN, window, content)
+	expect(after.y > before.y and after.distance_to(before) < 10, "Pointer crosses bottom bezel continuously")
 	room.queue_free()
 	await process_frame
 	print("Console coordinate checks: %s" % ("FAIL" if failed else "PASS"))

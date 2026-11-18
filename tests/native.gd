@@ -9,7 +9,8 @@ func _initialize() -> void:
 	var bridge = ClassDB.instantiate("EbonHawkNative")
 	var state: Dictionary = bridge.status()
 	var permissions: Dictionary = bridge.permissions()
-	if state.state != "unassigned" or state.interacting or not permissions.has_all(["capture", "accessibility", "listen"]):
+	var diagnostic_keys := ["window_id", "window_pid", "focus_match", "capture_width", "capture_height", "capture_scale", "capture_content_scale", "release_reason", "click_trace", "pointer_direct", "pointer_posted", "pointer_rejected"]
+	if state.state != "unassigned" or state.interacting or not permissions.has_all(["capture", "accessibility", "listen"]) or not state.has_all(diagnostic_keys):
 		push_error("Unexpected native initial/permission state")
 		quit(1)
 		return
