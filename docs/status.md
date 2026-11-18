@@ -1,21 +1,18 @@
 # Status — 2026-11-18
 
-M1 prototype source is implemented in the M0 placeholder. **M1 is not accepted: no real application window has been operated through Godot in this session.** M2 has not started. Working M0 navigation/physics remains available without the native library.
+M1 prototype source is implemented in the M0 placeholder. **Terminal capture, typing, Obsidian clipboard shortcuts, and ordinary clicks in selected windows are user-verified on the actual Mac; M1 acceptance remains incomplete.** M2 has not started.
 
-Implemented source:
+Current automated results:
 
-- ScreenCaptureKit window discovery, application/title picker, permission preflight and explicit request UI.
-- Single-window capture, latest-frame RGBA handoff and live-console texture path, aspect-fit coordinate mapping, native point/Retina metadata handling.
-- Camera alignment and navigation/picker/interaction ownership; target/release hints.
-- AX window matching/focus checks, floating Godot window, native input tap, original mouse/key/scroll forwarding, reserved Right Control/F12/Escape, reinjection tags and watchdog.
-- Forwarded-input cleanup and source/focus/resize/minimize/error states. Menus/dialogs remain an unverified single-window limitation.
+- Full native extension build: PASS, exit 0, no compiler warnings in the final build. The binding profile includes OS for godot-cpp logging, and dependency headers are treated as system headers while project warnings remain enabled.
+- Godot native smoke: PASS, exit 0; class registration, initial state/permissions, no-source refusal, repeated cleanup, and Objective-C++ call.
+- Full `tools/dev.py check`: PASS, exit 0; script parsing, M0 physics, coordinate/ray assertions, and headless scene startup.
+- Standalone macOS backend compile/link/lifecycle/input-ledger checks: PASS.
 
-Verified: the complete standalone macOS backend compiles and links with `-Wall -Wextra -Werror`; session lifecycle and input-ledger assertions pass. Godot script parsing, coordinate/ray assertions and existing M0 physics assertions pass. The strict combined check remains blocked by Godot's system-certificate startup error.
+The certificate startup error was resolved locally using ignored override.cfg with `/etc/ssl/cert.pem`. A reproducible example is in config/macos-ca.example.cfg. TLS verification and strict error detection remain enabled. Dependency download/build and certificate errors are no longer blockers in this workspace.
 
-Remaining blockers:
+User GUI results (2026-11-18): PASS for selecting/displaying the real Terminal on the console, E interaction, typing `pwd` and Return with live output, releasing with Right Control or Escape and resuming WASD after clicking Godot, and re-entering without stuck keys/modifiers. The user confirmed all three requested checks. The specific release key used was not identified; F12 and held-button/failure-path cleanup remain untested. This establishes the Terminal path with the room visible, not the whole app matrix.
 
-- Shell cannot resolve github.com, so pinned godot-cpp cannot be fetched. The Godot bridge has not compiled/loaded; no native texture or input path has been exercised inside Godot.
-- A new non-headless Godot smoke launch aborts with exit 134. No connected GUI inspection/control tool is available. No actual click/type/drag, app-focus, menu/dialog, minimization, occlusion or Spaces result can be claimed.
-- The separate backend test process reports capture/Accessibility/Input Monitoring denied. This is **that executable's** preflight, not proof of Godot's permission state. Godot must request/check its own grants after building.
+Agent GUI execution limitation: a fresh GUI smoke launch still aborts with exit 134 in this execution environment. An existing crash report points to AppKit/LaunchServices application registration (`_RegisterApplication`, `NSApplication init`), before scene execution. No connected GUI inspection/control tool is available. The user can run the GUI and has confirmed actual Terminal capture/input. Editor and browser workflows, mouse drag/double-click/scroll, resize/movement, menus/dialogs, occlusion, minimization, Spaces and failure-path cleanup remain open. Earlier standalone permission preflights apply only to that test executable; the user successfully enabled capture for the running Godot application.
 
-Next: run the exact build/launch commands and local permission/GUI matrix in [validation.md](validation.md). Keep M1 open until actual end-to-end results demonstrate correct-window input with the 3D room visible. The focus strategy remains a prototype; a successful API call alone does not pass the gate.
+See [validation.md](validation.md) for current results and the open manual matrix. Preserve M0 behavior; keep M1 open until the real-window workflows pass with the 3D room visible.

@@ -1,6 +1,6 @@
 # Ebon Hawk Desktop — Implementation Plan
 
-Status: M1 prototype source implemented in the M0 placeholder; M1 acceptance incomplete, with Godot native build/load and GUI validation blocked (2026-11-18). M2 has not started. See docs/status.md and docs/validation.md.
+Status: M1 prototype implemented; native build/load and automated checks pass with local CA configuration. Terminal interaction/release/re-entry are user-verified; remaining M1 GUI acceptance is open (2026-11-18). M2 has not started. See docs/status.md and docs/validation.md.
 Created: 2026-11-18.
 Target user: Jarrett Vickers, using an Apple Silicon MacBook Pro M4 Max.
 
@@ -173,16 +173,16 @@ Acceptance:
 
 Tasks:
 
-- [x] Implement window discovery/picker and actionable permission setup in source. Backend compiles; actual picker/permission flow NOT RUN.
-- [ ] Capture one selected window and display it on the placeholder console. Stream/frame/texture implementation present; Godot native build/load and real capture BLOCKED.
-- [x] Implement navigation/picker/interaction transitions and camera alignment in source. Ray/coordinate and M0 physics assertions pass; physical UI/native transition checks NOT RUN.
-- [x] Implement a target-focus/input prototype: uniquely match AX window, activate/verify target, float Godot, intercept/tag/remap events. SDK backend compiles; visibility and delivery are NOT proven.
-- [x] Implement coordinate mapping, original Quartz mouse/scroll/key/modifier forwarding, reserved release and watchdog/cleanup in source. Production mapping and ledger/lifecycle checks pass; actual event delivery NOT RUN.
+- [x] Implement window discovery/picker and actionable permission setup in source. Backend compiles; source selection verified; permission revocation remains open.
+- [x] Capture one selected window and display it on the placeholder console. User verified real Terminal capture on the actual Mac; native build/load also pass.
+- [x] Implement navigation/picker/interaction transitions and camera alignment in source. Ray/coordinate and M0 physics assertions pass; normal interaction, release and re-entry verified.
+- [x] Implement a target-focus/input prototype: uniquely match AX window, activate/verify target, float Godot, intercept/tag/remap events. SDK backend compiles; the room stayed visible during Terminal use and selected windows respond to clicks.
+- [x] Implement coordinate mapping, original Quartz mouse/scroll/key/modifier forwarding, reserved release and watchdog/cleanup in source. Production mapping and ledger/lifecycle checks pass; ordinary clicks, Terminal typing and Obsidian Cmd+C/V verified.
 - [ ] Exercise resizing, occlusion, and a minimized source; show clear source state. State/release paths implemented; actual GUI trials NOT RUN.
 - [ ] Investigate at least one native menu and one file-dialog workflow early. API boundary/expected failure documented; TextEdit menu and Cmd+O/Cancel trials NOT RUN.
-- [x] Record the prototype approach, rejected approaches and evidence limits in docs/architecture.md. Design remains unproven pending GUI tests.
+- [x] Record the prototype approach, rejected approaches and evidence limits in docs/architecture.md. Remaining GUI trials are listed below.
 
-M1 state (2026-11-18): **incomplete**. The macOS backend compiles/links and its ledger/lifecycle checks pass; coordinate/ray assertions and M0 physics assertions pass. Native GDExtension build is blocked by GitHub DNS; GUI launch aborts with exit 134. No real editor/browser/terminal, menu/dialog, occlusion/minimize or Spaces interaction has been observed. `docs/validation.md` records exact local build, permission, launch and manual-check steps. Checkmarks above mean source implementation only, not native acceptance. Stop at M1; M2 has not started.
+M1 state (2026-11-18): **partial, not complete**. Native build/load and the complete automated suite PASS with local CA configuration. The user confirms real Terminal capture, E interaction, `pwd` plus Return with live output, release to navigation, and re-entry without stuck input while the room remains visible. The specific release key used is unspecified; alternate-key and held-input/failure tests remain open. Full editor/browser workflows, drag selection, resize/movement, menus/dialogs, occlusion/minimization and Spaces checks are still outstanding. Agent GUI launch remains unavailable in its execution environment, which does not invalidate the user's successful local GUI run. See docs/validation.md for evidence and scope. Stop at M1; M2 has not started.
 
 Acceptance on the actual Mac:
 

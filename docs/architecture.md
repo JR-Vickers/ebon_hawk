@@ -5,7 +5,7 @@ Recorded 2026-11-18. These choices cover the placeholder foundation only.
 | Dependency | Pin / observed version | Reason |
 | --- | --- | --- |
 | Godot | `4.7.stable.official.5b4e0cb0f`; full commit `5b4e0cb0fd279832bbdd69fed5354d4e5ad26f88` | Installed standard engine; avoid changing the user's application. Launcher checks exact version. |
-| godot-cpp | `godot-4.5-stable`, commit `e83fd0904c13356ed1d4c3d09f8bb9132bdc6b77` | Immutable released binding baseline; only RefCounted/Object needed now. Uses bundled single-precision 4.5 API. |
+| godot-cpp | `godot-4.5-stable`, commit `e83fd0904c13356ed1d4c3d09f8bb9132bdc6b77` | Immutable released binding baseline; RefCounted/Object plus OS (required internally by godot-cpp logging). Uses bundled single-precision 4.5 API. |
 | CMake | `4.4.4` | Installed build tool; pin checked by launcher. Avoid adding SCons and another Python package environment. |
 | Binding-generator Python | `3.12.15` | Installed mature Python version, chosen instead of the host's much newer default. |
 | Default helper Python | `3.15.0` observed | Standard-library helper only; compilation checked with this interpreter. Not used for binding generation. |
@@ -30,13 +30,13 @@ The console's stable `placeholder_console_01` ID is metadata, independent of fut
 
 Use one Objective-C++ GDExtension with godot-cpp, rather than a Swift helper, IPC service, or custom Godot build. This keeps native APIs and Godot bindings in one library. M0 registers only `EbonHawkNative : RefCounted` with `build_info()`, which calls Foundation's NSProcessInfo inside an autorelease pool. No capture frameworks, window enumeration, Accessibility queries, event posting, permissions, or focus strategy exist yet.
 
-`native/.gdignore` keeps the optional extension out of automatic editor discovery until explicitly loaded by `tests/native.gd`. The placeholder scene has no native dependency and can run before the native library is built. M1 should deliberately integrate loading and failure reporting after proving this smoke test. The library is non-reloadable; restart Godot after rebuilding. A small godot-cpp build profile includes only the necessary class hierarchy; expand it as M1 adds APIs.
+`native/.gdignore` keeps the optional extension out of automatic editor discovery until explicitly loaded by `tests/native.gd`. The placeholder scene has no native dependency and can run before the native library is built. M1 should deliberately integrate loading and failure reporting after proving this smoke test. The library is non-reloadable; restart Godot after rebuilding. A small godot-cpp build profile includes the necessary class hierarchy and OS for godot-cpp logging; expand it as M1 adds APIs.
 
-CMake fetches the exact binding commit into ignored build output. It produces one debug dylib. Release builds, universal binaries, signing, app export, capture architecture, and input ownership remain future work. Native source is provided, but its full compilation and Godot loading are blocked by dependency download in this session; see validation.
+CMake fetches the exact binding commit into ignored build output. It produces one debug dylib. Release builds, universal binaries, signing, app export, capture architecture, and input ownership remain future work. The native extension now builds and loads through the Godot smoke check; real GUI acceptance remains partial. See validation.
 
 # M1 prototype — implemented source, native acceptance open
 
-Recorded 2026-11-18. The M0 description above is historical. M1 now explicitly loads the optional extension from the room's ConsoleController; `native/.gdignore` continues to prevent editor auto-loading and missing-library errors. The standard GDExtension pin is unchanged. **This design is not yet a proven native integration**: backend compile/link succeeds, but GitHub DNS prevents building the Godot bridge and the GUI process aborts in this execution environment.
+Recorded 2026-11-18. The M0 description above is historical. M1 now explicitly loads the optional extension from the room's ConsoleController; `native/.gdignore` continues to prevent editor auto-loading and missing-library errors. The standard GDExtension pin is unchanged. Native build/load and automated checks pass. Terminal capture, typing, release and re-entry are user-verified; broader real GUI acceptance remains open.
 
 ## Boundary and capture
 
@@ -60,7 +60,7 @@ Public API basis: [NSWindow levels](https://developer.apple.com/documentation/ap
 
 ## Coordinate pipeline
 
-The native tap reports Quartz desktop pointer coordinates converted through the actual Godot NSWindow/content view into logical view coordinates, with Cocoa/Quartz Y inversion relative to the main display. Godot scales these to its actual viewport size and intersects the camera ray with the console screen plane. Screen-local coordinates yield top-left UVs; a shared aspect-fit rectangle rejects bars and off-surface points.
+Interaction starts with a one-time move to the selected window's center. The native tap reads Quartz desktop points from physical pointer events. Godot projects each point through the captured image's aspect-fit rectangle onto the console mesh to draw the orange cursor. Native forwarding checks the original point against the verified target bounds. Crossing a console edge changes click eligibility without changing the coordinate system. Release restores the saved desktop pointer position.
 
 The SDK defines `SCStreamFrameInfoContentRect` in points in the output surface. Multiply it by the reported scale factor **once** to obtain the pixel crop. The shader samples only that crop. Input converts the accepted UV into a crop pixel, then uses `(pixel - crop.origin) / crop.size` to map to the latest AX/SCWindow rectangle in native desktop points. This ratio cancels Retina and capture downscale; it does not assume a screen origin or native window size. Content scale additionally verifies original captured dimensions against the AX frame, refusing events on stale/mismatched geometry. No sourceRect crop is configured. These metadata assumptions are SDK-based and require real Retina/resize tests.
 
@@ -78,4 +78,9 @@ A mutex-protected ledger tracks forwarded keys/buttons and modifier snapshots. R
 
 Only one primary window is captured. No claim is made that native menus, separate popup windows, open/save panels, or sheets are included. The current strategy can continue only while the retained AX window remains focused; otherwise it releases with a reason. A menu remaining in the same AX window may still be visually missing from the capture. An Open panel becoming a separate focused AX window is expected to trigger release. These are **predictions from the API boundaries, not observed app results**. No menu/file-dialog GUI workflow could be performed here; the validation matrix keeps them NOT RUN.
 
-The floating/all-Spaces policy is intended to preserve Godot visibility when activation changes Space. Fullscreen, Stage Manager, multiple displays, occlusion, minimized capture, and Space transitions remain unverified. AX minimization is used when the source can be matched; otherwise an absent source is conservatively reported unavailable instead of guessing that it closed. Refresh/resize/input errors retain a usable room and a source state. Manual restoration/reassignment is explicit. Do not call M1 passed until the real-editor/browser/terminal matrix is completed with the room visible.
+The floating/all-Spaces policy is intended to preserve Godot visibility when activation changes Space. Fullscreen, Stage Manager, multiple displays, occlusion, minimized capture, and Space transitions remain unverified. AX minimization is used when the source can be matched; otherwise an absent source is conservatively reported unavailable instead of guessing that it closed. Refresh/resize/input errors retain a usable room and a source state. Status exposes source state, selected window ID/PID, latest focus-match result, capture dimensions/scales, and last release reason. No typed text or captured frame is logged. The startup message changes to Capture live. on the first valid frame. Manual restoration/reassignment is explicit. Do not call M1 passed until the real-editor/browser/terminal matrix is completed with the room visible.
+
+
+## User feasibility evidence — 2026-11-18
+
+The user has now verified the Terminal path in the running Godot placeholder: actual window capture, E acquisition, typed `pwd` with live output, release to navigation, and re-entry without stuck keys/modifiers during the normal cycle. A supplied screenshot shows the captured Terminal on the console with the room still visible. This supplies end-to-end evidence for that app/path and supersedes the earlier blanket statement that no target input was tested. It does not establish the strategy for other apps, other windows, mouse workflows, menus/dialogs, Spaces or failure cleanup. See validation.md for exact evidence boundaries.

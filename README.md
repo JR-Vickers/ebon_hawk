@@ -1,6 +1,6 @@
 # Ebon Hawk Desktop
 
-A Godot placeholder room with first-person movement and one console. M1 capture/input prototype source is implemented, but **no real window has yet been operated end to end here**. The standalone macOS backend compiles; the full extension build is blocked by GitHub DNS, and GUI/permission-dependent acceptance remains open. See [validation](docs/validation.md). M2 has not started.
+A Godot placeholder room with first-person movement and one console. M1 capture/input prototype source is implemented, with **user-verified Terminal capture, `pwd` execution, release to navigation, clean re-entry, and working clicks in selected application windows**. The full native extension builds and its Godot smoke check passes. Automated checks pass with the documented local CA-bundle override; the remaining GUI acceptance matrix stays open. See [validation](docs/validation.md). M2 has not started.
 
 ## Launch
 
@@ -50,10 +50,10 @@ cp config/local.example.json config/local.json
 
 Edit the `godot`, `cmake`, and `python` executable paths. `GODOT` overrides the configured engine path. Exact engine, CMake, and binding-generator Python versions are checked by the launcher. `python3` used to launch the helper can be newer; it uses only the standard library. Local JSON is developer tooling configuration, not an in-game settings store. Invalid JSON fails visibly.
 
+If Godot reports `get_system_ca_certificates` / `ret != noErr`, this session resolved it by setting a local CA bundle in ignored `override.cfg`. Merge [config/macos-ca.example.cfg](config/macos-ca.example.cfg) into that file, preserving other overrides. This uses macOS's `/etc/ssl/cert.pem` instead of querying Keychain anchors; TLS verification stays enabled. It does not include user-installed Keychain trust overrides. The local override is already configured in this workspace; no action is needed here. The strict checks continue to reject all ERROR lines.
+
 Keep shared Godot settings in `project.godot` and authored scenes in `scenes/`. Optional Godot `override.cfg` is local and ignored. Future persistent application settings should use versioned `user://` files (normally `~/Library/Application Support/Godot/app_userdata/Ebon Hawk Desktop/` on this Mac); M0 does not implement a settings or assignment store. Logs from helpers are directed into ignored `build/`.
 
 `.godot/`, `build/`, native binaries, local configuration, and `assets/local/`, `assets/extracted/`, `assets/generated/` are ignored. Keep user-supplied game files and installation paths there when the asset milestone begins. Authored `.uid` files are retained. No extracted assets, Blender, importer, or export templates are needed for M0.
-
-The initial M0 folder was not a Git repository. Git was initialized externally before M1; all project files are currently untracked. No initialization or commit was performed by this implementation task. The subsequently supplied AGENTS.md commit rules were read and preserved. The existing [implementation plan](docs/PLAN.md) is preserved with its M0 status updated.
 
 See [status](docs/status.md), [validation and local acceptance checks](docs/validation.md), and [architecture](docs/architecture.md).
