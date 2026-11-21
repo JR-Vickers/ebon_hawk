@@ -6,7 +6,9 @@
 - (void)requestPermissions;
 - (void)refreshWindows;
 - (NSArray *)windows;
+- (NSData *)applicationIcon:(int)pid;
 - (BOOL)selectWindow:(uint32_t)windowID;
+- (void)setQuality:(unsigned)width fps:(unsigned)fps;
 - (NSDictionary *)status;
 - (NSDictionary *)takeFrame;
 - (BOOL)beginInteraction:(uint64_t)nativeWindow releaseKey:(unsigned)key;

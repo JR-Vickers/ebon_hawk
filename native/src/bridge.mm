@@ -41,7 +41,9 @@ protected:
         ClassDB::bind_method(D_METHOD("request_permissions"), &EbonHawkNative::request_permissions);
         ClassDB::bind_method(D_METHOD("refresh_windows"), &EbonHawkNative::refresh_windows);
         ClassDB::bind_method(D_METHOD("windows"), &EbonHawkNative::windows);
+        ClassDB::bind_method(D_METHOD("application_icon", "pid"), &EbonHawkNative::application_icon);
         ClassDB::bind_method(D_METHOD("select_window", "window_id"), &EbonHawkNative::select_window);
+        ClassDB::bind_method(D_METHOD("set_quality", "width", "fps"), &EbonHawkNative::set_quality);
         ClassDB::bind_method(D_METHOD("status"), &EbonHawkNative::status);
         ClassDB::bind_method(D_METHOD("take_frame"), &EbonHawkNative::take_frame);
         ClassDB::bind_method(D_METHOD("begin_interaction", "native_window", "release_key"), &EbonHawkNative::begin_interaction);
@@ -60,7 +62,12 @@ public:
     void request_permissions() { [session requestPermissions]; }
     void refresh_windows() { [session refreshWindows]; }
     Array windows() { return convert([session windows]); }
+    PackedByteArray application_icon(int64_t pid) {
+        NSData *data = [session applicationIcon:(int)pid];
+        return data ? (PackedByteArray)convert(data) : PackedByteArray();
+    }
     bool select_window(int64_t id) { return [session selectWindow:(uint32_t)id]; }
+    void set_quality(int64_t width, int64_t fps) { [session setQuality:(unsigned)width fps:(unsigned)fps]; }
     Dictionary status() { return convert([session status]); }
     Dictionary take_frame() { return convert([session takeFrame]); }
     bool begin_interaction(int64_t window, int64_t key) { return [session beginInteraction:window releaseKey:(unsigned)key]; }

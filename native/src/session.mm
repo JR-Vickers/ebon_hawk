@@ -5,11 +5,14 @@
 #import <CoreMedia/CoreMedia.h>
 #import <CoreVideo/CoreVideo.h>
 #include "input_ledger.hpp"
+#include "key_repeat.hpp"
 #include "event_routing.hpp"
+#include "window_identity.hpp"
 #include <atomic>
 #include <mutex>
 #include <thread>
 #include <cmath>
+#include <vector>
 
 // Optional WindowServer SPI. A normal CGDisplayHideCursor request loses
 // effect when the captured application becomes frontmost.
@@ -17,6 +20,7 @@ extern "C" {
 int _CGSDefaultConnection(void) __attribute__((weak_import));
 CGError CGSCopyConnectionProperty(int, int, CFStringRef, CFTypeRef *) __attribute__((weak_import));
 CGError CGSSetConnectionProperty(int, int, CFStringRef, CFTypeRef) __attribute__((weak_import));
+AXError _AXUIElementGetWindow(AXUIElementRef, CGWindowID *) __attribute__((weak_import));
 }
 static CFStringRef backgroundCursorKey() { return CFSTR("SetsCursorInBackground"); }
 
@@ -44,6 +48,7 @@ static bool axRect(AXUIElementRef element, CGRect &rect) {
 @interface EHEvent : NSObject
 @property CGEventRef event;
 @property uint64_t token;
+@property uint64_t repeatPress;
 @end
 @implementation EHEvent
 - (void)dealloc { if (_event) CFRelease(_event); }
@@ -64,6 +69,9 @@ static bool axRect(AXUIElementRef element, CGRect &rect) {
     std::atomic<double> _heartbeat;
     std::mutex _inputMutex;
     EHInputLedger _held;
+    EHKeyRepeat _keyRepeat;
+    double _repeatDelay, _repeatInterval;
+    uint64_t _repeatGenerated, _repeatFallbackPosted, _repeatNativePosted;
     NSMutableArray<EHEvent *> *_queued;
     NSMutableDictionary<NSNumber *, EHEvent *> *_pending;
     uint64_t _token;
@@ -78,6 +86,8 @@ static bool axRect(AXUIElementRef element, CGRect &rect) {
     size_t _captureWidth, _captureHeight;
     double _captureScale, _captureContentScale;
     BOOL _focusMatch;
+    std::atomic<bool> _interactionPending;
+    double _interactionDeadline, _nextInteractionAttempt;
     NSWindow *_godotWindow;
     NSWindowLevel _previousLevel;
     BOOL _previousHides;
@@ -88,7 +98,7 @@ static bool axRect(AXUIElementRef element, CGRect &rect) {
     bool _clickSeen[2];
     CFRunLoopRef _tapLoop;
     std::thread _tapThread;
-    unsigned _releaseKey;
+    unsigned _releaseKey, _qualityWidth, _qualityFPS;
     pid_t _targetPID;
 }
 - (void)observeClick:(CGEventType)type event:(CGEventRef)event;
@@ -112,7 +122,7 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
 @implementation EHSession
 - (instancetype)init {
     if ((self=[super init])) {
-        _windows=@[]; _state=@"unassigned"; _message=@"Choose a window with P near the console.";
+        _qualityWidth=1920; _qualityFPS=30; _windows=@[]; _state=@"unassigned"; _message=@"Choose a window with P near the console.";
         _releaseReason=@"";
         _queued=[NSMutableArray new]; _pending=[NSMutableDictionary new];
     }
@@ -139,18 +149,20 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
 - (void)refreshWindows {
     if (_refreshing || !CGPreflightScreenCaptureAccess()) return;
     _refreshing=YES; _lastRefresh=now();
+    NSUInteger generation=_generation;
     __weak EHSession *weakSelf=self;
     [SCShareableContent getShareableContentExcludingDesktopWindows:YES onScreenWindowsOnly:NO
         completionHandler:^(SCShareableContent *content, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             EHSession *s=weakSelf; if (!s) return;
+            if (generation!=s->_generation) return;
             s->_refreshing=NO;
             if (error) { [s releaseInput:@"Window discovery failed"]; @synchronized(s) { s->_state=@"error"; s->_message=error.localizedDescription; } return; }
             NSMutableArray *eligible=[NSMutableArray new];
             SCWindow *current=nil;
             for (SCWindow *w in content.windows) {
                 if (w.windowID==s->_selected.windowID) current=w;
-                if (w.owningApplication && w.owningApplication.processID!=getpid() && w.windowLayer==0 && w.frame.size.width>40 && w.frame.size.height>40)
+                if (w.owningApplication && w.owningApplication.processID!=getpid() && w.frame.size.width>1 && w.frame.size.height>1)
                     [eligible addObject:w];
             }
             s->_windows=eligible;
@@ -181,30 +193,66 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
 }
 - (NSArray *)windows {
     NSMutableArray *result=[NSMutableArray new];
-    for (SCWindow *w in _windows) [result addObject:@{@"id":@(w.windowID), @"pid":@(w.owningApplication.processID),
-        @"app":w.owningApplication.applicationName ?: @"Application", @"title":w.title ?: @"Untitled",
-        @"on_screen":@(w.isOnScreen)}];
+    for (SCWindow *w in _windows) {
+        NSRunningApplication *app=[NSRunningApplication runningApplicationWithProcessIdentifier:w.owningApplication.processID];
+        BOOL regular=app && app.activationPolicy==NSApplicationActivationPolicyRegular;
+        NSString *title=[w.title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        // Off-Space windows are frequently reported off-screen in fullscreen mode.
+        // Keep named windows from ordinary apps, including across Spaces.
+        BOOL pickerEligible=regular && w.windowLayer==0 && w.frame.size.width>40 && w.frame.size.height>40 && (w.isOnScreen || title.length>0);
+        [result addObject:@{@"id":@(w.windowID), @"pid":@(w.owningApplication.processID),
+            @"app":w.owningApplication.applicationName ?: @"Application", @"bundle_id":w.owningApplication.bundleIdentifier ?: @"", @"title":w.title ?: @"Untitled",
+            @"on_screen":@(w.isOnScreen), @"picker_eligible":@(pickerEligible)}];
+    }
     return result;
+}
+- (NSData *)applicationIcon:(int)pid {
+    NSRunningApplication *app=[NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    NSImage *icon=app.icon;
+    if (!icon) return nil;
+    NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:nullptr
+        pixelsWide:64 pixelsHigh:64 bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES
+        isPlanar:NO colorSpaceName:NSCalibratedRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+    if (!bitmap) return nil;
+    NSGraphicsContext *context=[NSGraphicsContext graphicsContextWithBitmapImageRep:bitmap];
+    if (!context) return nil;
+    [NSGraphicsContext saveGraphicsState];
+    [NSGraphicsContext setCurrentContext:context];
+    context.imageInterpolation=NSImageInterpolationHigh;
+    [icon drawInRect:NSMakeRect(0,0,64,64) fromRect:NSZeroRect
+        operation:NSCompositingOperationSourceOver fraction:1.0];
+    [NSGraphicsContext restoreGraphicsState];
+    return [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
 }
 - (SCStreamConfiguration *)configuration:(SCWindow *)window {
     SCContentFilter *filter=[[SCContentFilter alloc] initWithDesktopIndependentWindow:window];
     // Choose source display scale, then cap width; metadata describes any downscale.
     double scale=filter.pointPixelScale;
     double width=window.frame.size.width*scale, height=window.frame.size.height*scale;
-    double shrink=fmin(1.0,1920.0/fmax(width,height));
+    double shrink=fmin(1.0,(double)_qualityWidth/fmax(width,height));
     SCStreamConfiguration *c=[SCStreamConfiguration new];
     c.width=MAX(2,lrint(width*shrink)); c.height=MAX(2,lrint(height*shrink));
-    c.pixelFormat=kCVPixelFormatType_32BGRA; c.minimumFrameInterval=CMTimeMake(1,30);
+    c.pixelFormat=kCVPixelFormatType_32BGRA; c.minimumFrameInterval=CMTimeMake(1,_qualityFPS);
     c.queueDepth=3; c.showsCursor=NO; c.capturesAudio=NO;
     c.ignoreShadowsSingleWindow=YES; c.scalesToFit=YES; c.preservesAspectRatio=YES;
     return c;
+}
+- (void)setQuality:(unsigned)width fps:(unsigned)fps {
+    width=MAX(320u,MIN(width,1920u)); fps=MAX(1u,MIN(fps,30u));
+    if (_qualityWidth==width && _qualityFPS==fps) return;
+    _qualityWidth=width; _qualityFPS=fps;
+    if (_stream && _selected) {
+        SCStream *stream=_stream;
+        [stream updateConfiguration:[self configuration:_selected] completionHandler:^(NSError *error) {
+            if (error) [self captureError:error stream:stream];
+        }];
+    }
 }
 - (BOOL)selectWindow:(uint32_t)windowID {
     [self stop];
     for (SCWindow *w in _windows) if (w.windowID==windowID) { _selected=w; break; }
     if (!_selected || !CGPreflightScreenCaptureAccess()) return NO;
     _targetPID=_selected.owningApplication.processID;
-    if (AXIsProcessTrusted()) [self matchAXWindow];
     NSUInteger generation=++_generation;
     @synchronized(self) { _state=@"starting"; _message=@"Starting single-window capture…"; }
     SCContentFilter *filter=[[SCContentFilter alloc] initWithDesktopIndependentWindow:_selected];
@@ -222,6 +270,10 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
     return YES;
 }
 - (void)captureError:(NSError *)error stream:(SCStream *)stream {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self captureError:error stream:stream]; });
+        return;
+    }
     @synchronized(self) {
         if (stream!=_stream) return;
         _state=@"error"; _message=error.localizedDescription ?: @"Capture failed"; _frame=nil;
@@ -241,8 +293,9 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
                 if (stream!=_stream) return;
                 if (status==SCFrameStatusIdle) { _lastSample=now(); return; }
                 _state=(status==SCFrameStatusSuspended || status==SCFrameStatusBlank) ? @"paused" : @"waiting";
+                _interactionPending=false;
             }
-            [self releaseInput:@"Capture is paused or unavailable; input released."]; return;
+            dispatch_async(dispatch_get_main_queue(), ^{ if (stream==self->_stream) [self releaseInput:@"Capture is paused or unavailable; input released. Restore or reselect the source."]; }); return;
         }
         CVPixelBufferRef buffer=CMSampleBufferGetImageBuffer(sample);
         if (!buffer) return;
@@ -255,8 +308,8 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
         CGRect pixels=CGRectMake(content.origin.x*scale,content.origin.y*scale,content.size.width*scale,content.size.height*scale);
         if (scale<=0 || contentScale<=0 || pixels.size.width<=0 || pixels.size.height<=0 ||
             pixels.origin.x<0 || pixels.origin.y<0 || CGRectGetMaxX(pixels)>width+1 || CGRectGetMaxY(pixels)>height+1) {
-            @synchronized(self) { if (stream!=_stream) return; _state=@"invalid_metadata"; _frame=nil; }
-            [self releaseInput:@"Invalid capture metadata; input disabled."]; return;
+            @synchronized(self) { if (stream!=_stream) return; _state=@"invalid_metadata"; _frame=nil; _interactionPending=false; }
+            dispatch_async(dispatch_get_main_queue(), ^{ if (stream==self->_stream) [self releaseInput:@"Invalid capture metadata; input disabled. Reselect the source."]; }); return;
         }
         if (CVPixelBufferLockBaseAddress(buffer,kCVPixelBufferLock_ReadOnly)!=kCVReturnSuccess) return;
         NSMutableData *rgba=[NSMutableData dataWithLength:width*height*4];
@@ -285,14 +338,56 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
     if (_axApp) CFRelease(_axApp);
     _axApp=AXUIElementCreateApplication(_targetPID);
     AXUIElementSetMessagingTimeout(_axApp,0.15);
-    NSArray *windows=axCopy(_axApp,kAXWindowsAttribute);
-    NSMutableArray *matches=[NSMutableArray new];
-    for (id item in windows) {
-        AXUIElementRef w=(__bridge AXUIElementRef)item; CGRect bounds;
-        if (axRect(w,bounds) && nearRect(bounds,_selected.frame) &&
-            (!_selected.title.length || [axCopy(w,kAXTitleAttribute) isEqualToString:_selected.title])) [matches addObject:item];
+    NSMutableArray *windows=[NSMutableArray new];
+    std::vector<CFTypeRef> identities;
+    AXError errors[4]; NSUInteger counts[4]={0,0,0,0};
+    CFStringRef attributes[]={kAXWindowsAttribute,kAXMainWindowAttribute,kAXFocusedWindowAttribute,kAXChildrenAttribute};
+    for (int i=0;i<4;++i) {
+        CFTypeRef value=nullptr;
+        errors[i]=AXUIElementCopyAttributeValue(_axApp,attributes[i],&value);
+        id raw=CFBridgingRelease(value);
+        NSArray *items=[raw isKindOfClass:NSArray.class] ? raw : (raw ? @[raw] : @[]);
+        for (id item in items) {
+            if (CFGetTypeID((__bridge CFTypeRef)item)!=AXUIElementGetTypeID()) continue;
+            if (i==3 && ![axCopy((__bridge AXUIElementRef)item,kAXRoleAttribute) isEqualToString:(__bridge NSString *)kAXWindowRole]) continue;
+            ++counts[i];
+            CFTypeRef identity=(__bridge CFTypeRef)item;
+            if (!ehContainsIdentity(identities,identity,[](CFTypeRef a, CFTypeRef b) { return CFEqual(a,b); })) {
+                [windows addObject:item]; identities.push_back(identity);
+            }
+        }
     }
-    if (matches.count!=1) { @synchronized(self) { _message=@"Cannot uniquely match selected capture window to an Accessibility window. Input refused."; } return NO; }
+    NSMutableArray *idMatches=[NSMutableArray new], *geometryMatches=[NSMutableArray new];
+    NSUInteger readableIDs=0, readableBounds=0;
+    for (id item in windows) {
+        if (CFGetTypeID((__bridge CFTypeRef)item)!=AXUIElementGetTypeID()) continue;
+        AXUIElementRef w=(__bridge AXUIElementRef)item;
+        CGWindowID windowID=0;
+        if (_AXUIElementGetWindow && _AXUIElementGetWindow(w,&windowID)==kAXErrorSuccess && windowID) {
+            ++readableIDs;
+            if (windowID==_selected.windowID) [idMatches addObject:item];
+            continue;
+        }
+        CGRect bounds;
+        if (axRect(w,bounds)) {
+            ++readableBounds;
+            if (_selected.title.length && nearRect(bounds,_selected.frame) &&
+                [axCopy(w,kAXTitleAttribute) isEqualToString:_selected.title])
+                [geometryMatches addObject:item];
+        }
+    }
+    // A successful window ID is definitive; never substitute a different ID
+    // even if it happens to share the captured window's title and geometry.
+    EHWindowChoice choice=ehWindowChoice(idMatches.count,geometryMatches.count);
+    NSArray *matches=choice==EHWindowChoice::exact_id ? idMatches : geometryMatches;
+    NSLog(@"Ebon Hawk AX discovery: errors=%d,%d,%d,%d counts=%lu,%lu,%lu,%lu unique=%lu readable_ids=%lu readable_bounds=%lu id_matches=%lu fallback_matches=%lu",
+        (int)errors[0],(int)errors[1],(int)errors[2],(int)errors[3],
+        (unsigned long)counts[0],(unsigned long)counts[1],(unsigned long)counts[2],(unsigned long)counts[3],
+        (unsigned long)windows.count,(unsigned long)readableIDs,(unsigned long)readableBounds,
+        (unsigned long)idMatches.count,(unsigned long)geometryMatches.count);
+    if (choice==EHWindowChoice::none) {
+        return NO;
+    }
     _axWindow=(AXUIElementRef)CFRetain((__bridge CFTypeRef)matches.firstObject);
     return YES;
 }
@@ -309,7 +404,6 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
         @synchronized(self) { _message=@"Grant Screen Recording, Accessibility, and Input Monitoring to Godot, then restart it."; } return NO;
     }
     @synchronized(self) { if (![_state isEqual:@"live"]) { _message=@"Wait for a live frame before interacting."; return NO; } }
-    if (![self matchAXWindow]) return NO;
     _godotWindow=(__bridge NSWindow *)(void *)nativeWindow;
     if (!_godotWindow || ![NSApp.windows containsObject:_godotWindow]) { _godotWindow=nil; @synchronized(self) { _message=@"No standalone Godot NSWindow. Launch with tools/dev.py run (not embedded editor play)."; } return NO; }
     _releaseKey=(key==111 ? 111 : 62);
@@ -320,6 +414,33 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
         NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
     _godotWindow.level=NSFloatingWindowLevel; _godotWindow.hidesOnDeactivate=NO;
     [_godotWindow orderFrontRegardless];
+    _interactionPending=YES; _interactionDeadline=now()+4.0; _nextInteractionAttempt=now()+0.2;
+    [self matchAXWindow]; // Record the pre-activation discovery for comparison.
+    [[NSRunningApplication runningApplicationWithProcessIdentifier:_targetPID] activateWithOptions:0];
+    @synchronized(self) { _message=@"Finding and focusing the selected window…"; }
+    return YES;
+}
+- (void)advanceInteraction {
+    if (!_interactionPending) return;
+    BOOL live; @synchronized(self) { live=[_state isEqual:@"live"]; }
+    if (!live || !CGPreflightScreenCaptureAccess() || !CGPreflightListenEventAccess() || !AXIsProcessTrusted()) {
+        @synchronized(self) { _message=@"Capture or required permission became unavailable. Restore the source and permissions, then retry."; }
+        [self endInteraction]; return;
+    }
+    if (now()>=_interactionDeadline) {
+        @synchronized(self) { _message=@"Could not find and focus the selected window. Restore it, check Accessibility permission, and retry."; }
+        [self endInteraction]; return;
+    }
+    if (now()<_nextInteractionAttempt) return;
+    _nextInteractionAttempt=now()+0.2;
+    if (![self matchAXWindow]) return;
+    AXUIElementPerformAction(_axWindow,kAXRaiseAction);
+    AXUIElementSetAttributeValue(_axWindow,kAXMainAttribute,kCFBooleanTrue);
+    AXUIElementSetAttributeValue(_axApp,kAXFocusedWindowAttribute,_axWindow);
+    if (![self targetFocused] || !_interactionPending) return;
+    [self acquireInput];
+}
+- (BOOL)acquireInput {
     _heartbeat=now(); _focusDeadline=now()+1.5;
     CGEventMask mask=CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventKeyUp)|CGEventMaskBit(kCGEventFlagsChanged)|
         CGEventMaskBit(kCGEventLeftMouseDown)|CGEventMaskBit(kCGEventLeftMouseUp)|CGEventMaskBit(kCGEventRightMouseDown)|CGEventMaskBit(kCGEventRightMouseUp)|
@@ -350,7 +471,16 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
     CGEventMask clicks=CGEventMaskBit(kCGEventLeftMouseDown)|CGEventMaskBit(kCGEventLeftMouseUp);
     _clickObserver=CGEventTapCreate(kCGAnnotatedSessionEventTap,kCGTailAppendEventTap,
         kCGEventTapOptionListenOnly,clicks,observeCallback,(__bridge void *)self);
-    _active=true;
+    _repeatGenerated=_repeatFallbackPosted=_repeatNativePosted=0;
+    _repeatDelay=NSEvent.keyRepeatDelay;
+    _repeatInterval=NSEvent.keyRepeatInterval;
+    BOOL activate;
+    @synchronized(self) {
+        activate=_interactionPending && [_state isEqual:@"live"] && CGPreflightScreenCaptureAccess() && CGPreflightListenEventAccess() && AXIsProcessTrusted();
+        _interactionPending=NO;
+        if (activate) _active=true;
+    }
+    if (!activate) { [self endInteraction]; return NO; }
     _tapThread=std::thread([self] {
         @autoreleasepool {
             CFRunLoopRef loop=CFRunLoopGetCurrent(); CFRetain(loop);
@@ -371,14 +501,11 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
             CFRelease(loop);
         }
     });
-    [[NSRunningApplication runningApplicationWithProcessIdentifier:_targetPID] activateWithOptions:0];
-    AXUIElementPerformAction(_axWindow,kAXRaiseAction);
-    AXUIElementSetAttributeValue(_axWindow,kAXMainAttribute,kCFBooleanTrue);
-    AXUIElementSetAttributeValue(_axApp,kAXFocusedWindowAttribute,_axWindow);
     @synchronized(self) { _message=@"Input prototype active. Right Control / Escape releases; Cmd+Q quits Godot."; }
     return YES;
 }
 - (void)releaseInput:(NSString *)reason {
+    _interactionPending=false;
     _active=false;
     std::lock_guard<std::mutex> lock(_inputMutex);
     if (_restoreEntryCursor) {
@@ -395,6 +522,7 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
         _restoreCursorProperty=false;
     }
     _previousCursorProperty=nil;
+    _keyRepeat.clear();
     auto releases=_held.drain();
     for (unsigned key:releases.keys) {
         CGEventRef e=CGEventCreateKeyboardEvent(nullptr,(CGKeyCode)key,false);
@@ -413,6 +541,7 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
     @synchronized(self) { _message=reason; _releaseReason=reason ?: @""; }
 }
 - (void)endInteraction {
+    _interactionPending=NO;
     NSString *reason;
     @synchronized(self) { reason=_active ? @"Input released. E to interact; P to change source." : _message; }
     [self releaseInput:reason];
@@ -442,7 +571,13 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
     if (!event) return event;
     unsigned code=(unsigned)CGEventGetIntegerValueField(event,kCGKeyboardEventKeycode);
     BOOL keyboard=type==kCGEventKeyDown || type==kCGEventKeyUp || type==kCGEventFlagsChanged;
-    if (keyboard && (code==_releaseKey || code==53)) {
+    // Own the complete Escape gesture before returning focus to Godot.
+    // Otherwise macOS can deliver the remainder of the press to navigation.
+    if (keyboard && code==53) {
+        if (type==kCGEventKeyUp) [self releaseInput:@"Escape released; input released."];
+        return nullptr;
+    }
+    if (keyboard && code==_releaseKey) {
         [self releaseInput:@"Reserved release key; input released."]; return nullptr;
     }
     if (keyboard && (CGEventGetFlags(event)&kCGEventFlagMaskCommand) && (code==48 || code==12)) {
@@ -455,6 +590,7 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
         _heartbeat=0; return nullptr;
     }
     EHEvent *item=[EHEvent new]; item.event=CGEventCreateCopy(event); item.token=++_token;
+    _keyRepeat.observe(type,event,item.token,now(),_repeatDelay);
     [_queued addObject:item];
     return nullptr;
 }
@@ -462,6 +598,14 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
     NSMutableArray *result=[NSMutableArray new];
     std::lock_guard<std::mutex> lock(_inputMutex);
     [_pending removeAllObjects];
+    double time=now();
+    CGEventRef repeat=_keyRepeat.copyDue(time,_repeatInterval,(CGEventTimestamp)(time*1e9));
+    if (repeat) {
+        ++_repeatGenerated;
+        EHEvent *item=[EHEvent new];
+        item.event=repeat; item.token=++_token; item.repeatPress=_keyRepeat.pressToken();
+        [_queued addObject:item];
+    }
     for (EHEvent *item in _queued) {
         CGEventType type=CGEventGetType(item.event);
         BOOL key=type==kCGEventKeyDown || type==kCGEventKeyUp || type==kCGEventFlagsChanged;
@@ -482,9 +626,12 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
     std::lock_guard<std::mutex> lock(_inputMutex);
     EHEvent *item=_pending[@(eventID)]; [_pending removeObjectForKey:@(eventID)];
     if (!_active || !item) return NO;
+    // A physical release or a new press can arrive between poll and forward.
+    if (item.repeatPress && item.repeatPress!=_keyRepeat.pressToken()) return NO;
     CGEventRef e=item.event; CGEventType type=CGEventGetType(e);
     bool keyboard=type==kCGEventKeyDown || type==kCGEventKeyUp || type==kCGEventFlagsChanged;
     bool pidDelivery=keyboard;
+    bool repeating=type==kCGEventKeyDown && CGEventGetIntegerValueField(e,kCGKeyboardEventAutorepeat);
     if (!keyboard) {
         unsigned button=(unsigned)CGEventGetIntegerValueField(e,kCGMouseEventButtonNumber);
         bool up=type==kCGEventLeftMouseUp || type==kCGEventRightMouseUp || type==kCGEventOtherMouseUp;
@@ -545,7 +692,7 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
         if (type==kCGEventLeftMouseUp || type==kCGEventRightMouseUp || type==kCGEventOtherMouseUp) _held.button(button,false);
     } else {
         unsigned code=(unsigned)CGEventGetIntegerValueField(e,kCGKeyboardEventKeycode);
-        if (type==kCGEventKeyUp && !_held.keys.count(code)) return NO;
+        if ((type==kCGEventKeyUp || repeating) && !_held.keys.count(code)) return NO;
         if (type!=kCGEventFlagsChanged) _held.key(code,type==kCGEventKeyDown);
         else if (code!=57) _held.key(code,CGEventSourceKeyState(kCGEventSourceStateHIDSystemState,(CGKeyCode)code));
     }
@@ -556,6 +703,18 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
         _held.key(pair.first,(flags & pair.second)!=0);
     ehMarkTargetProcess(e,_targetPID);
     if (!keyboard) ++_pointerPosted;
+    if (repeating) {
+        unsigned code=(unsigned)CGEventGetIntegerValueField(e,kCGKeyboardEventKeycode);
+        if (EHKeyRepeat::isEditingKey(code,flags)) {
+            CGEventRef up=EHKeyRepeat::prepareEditingRepeat(e);
+            if (up) {
+                CGEventPostToPid(_targetPID,up);
+                CFRelease(up);
+            }
+        }
+        if (item.repeatPress) ++_repeatFallbackPosted;
+        else ++_repeatNativePosted;
+    }
     if (pidDelivery) {
         CGEventPostToPid(_targetPID,e);
     } else {
@@ -565,8 +724,9 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
 }
 - (NSDictionary *)status {
     _heartbeat=now();
+    [self advanceInteraction];
     if (_selected && now()-_lastRefresh>1.0) [self refreshWindows];
-    if (_active && now()>_focusDeadline && ![self targetFocused]) [self releaseInput:@"Target focus changed (possibly menu/dialog/Space); input released."];
+    if (_active && now()>_focusDeadline && ![self targetFocused]) [self releaseInput:@"Focus changed; input released. Press P and choose a task window from this app, or retry E."];
     if (_active && !CGPreflightScreenCaptureAccess()) [self releaseInput:@"Screen Recording permission revoked."];
     @synchronized(self) {
         if (_selected && _lastSample>0 && now()-_lastSample>3 && [_state isEqual:@"live"]) {
@@ -584,7 +744,10 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
                 (_clickObserver && CGEventTapIsEnabled(_clickObserver) ? @"unseen" : @"unavailable");
             [trace addObject:[NSString stringWithFormat:@"%@ | downstream %@",_clickTrace[i],observation]];
         }
-        return @{@"click_trace":[trace componentsJoinedByString:@"\n"],@"state":_state,@"message":_message,@"interacting":@(_active.load()),
+        return @{@"click_trace":[trace componentsJoinedByString:@"\n"],@"state":_state,@"message":_message,@"interacting":@(_active.load()),@"interaction_pending":@(_interactionPending.load()),
+            @"repeat_delay":@(_repeatDelay),@"repeat_interval":@(_repeatInterval),
+            @"repeat_generated":@(_repeatGenerated),@"repeat_fallback_posted":@(_repeatFallbackPosted),
+            @"repeat_native_posted":@(_repeatNativePosted),
             @"window_id":@(_selected.windowID),@"window_pid":@(_selected.owningApplication.processID),
             @"label":_selected ? [NSString stringWithFormat:@"%@ — %@",_selected.owningApplication.applicationName,_selected.title ?: @"Untitled"] : @"No source",
             @"window_rect":rectArray(_selected.frame),@"sample_age":@(_lastSample>0?now()-_lastSample:-1),
@@ -595,6 +758,7 @@ static void watchdog(CFRunLoopTimerRef, void *context) {
 }
 - (void)stop {
     [self endInteraction]; ++_generation;
+    _refreshing=NO;
     SCStream *stream; @synchronized(self) { stream=_stream; _stream=nil; _frame=nil; _state=@"unassigned"; _lastSample=0; _capturedSize=CGSizeZero; _captureWidth=0; _captureHeight=0; _captureScale=0; _captureContentScale=0; _focusMatch=NO; }
     [stream stopCaptureWithCompletionHandler:^(NSError *) {}];
     if (_axWindow) { CFRelease(_axWindow); _axWindow=nullptr; }

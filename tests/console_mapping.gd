@@ -1,5 +1,5 @@
 extends SceneTree
-const Mapping = preload("res://scripts/console_mapping.gd")
+const Mapping = preload("res://scripts/console_surface_mapping.gd")
 var failed: bool = false
 func expect(condition: bool, message: String) -> void:
 	if not condition:
@@ -9,6 +9,7 @@ func _initialize() -> void:
 	# A 4:3 source on a 2:1 surface has pillarboxes. Reject the bars.
 	expect(Mapping.normalized(Vector2(0.05, 0.5), Vector2(800, 600)).x < 0, "Pillarbox click rejected")
 	expect(Mapping.normalized(Vector2(0.5, 0.5), Vector2(800, 600)).is_equal_approx(Vector2(0.5, 0.5)), "Aspect-fit center")
+	expect(Mapping.normalized(Vector2(0.1, 0.5), Vector2(800, 600), Vector2(1, 2)).is_equal_approx(Vector2(0.1, 0.5)), "Portrait surface respects its own aspect ratio")
 	# A wide source has letterboxes. Invalid dimensions never produce an input point.
 	expect(Mapping.normalized(Vector2(0.5, 0.01), Vector2(2400, 600)).x < 0, "Letterbox click rejected")
 	expect(Mapping.normalized(Vector2(0.5, 0.5), Vector2.ZERO).x < 0, "Unavailable source rejected")

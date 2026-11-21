@@ -18,16 +18,15 @@ func _ready() -> void:
 	for action: String in keys:
 		var key := InputEventKey.new()
 		key.physical_keycode = keys[action]
-		InputMap.action_add_event(action, key)
+		if not InputMap.action_has_event(action, key):
+			InputMap.action_add_event(action, key)
 	if DisplayServer.get_name() != "headless":
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _unhandled_input(event: InputEvent) -> void:
 	if controls_locked:
 		return
-	if event.is_action_pressed("ui_cancel"):
-		set_navigation(false)
-	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		set_navigation(true)
 	elif event.is_action_pressed("reset_spawn"):
 		reset_to_spawn()

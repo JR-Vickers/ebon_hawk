@@ -109,6 +109,10 @@ mesh = SubResource("CeilingMesh")
 [node name="Console" parent="." instance=ExtResource("2")]
 position = Vector3(0, 0, -3)
 
+[node name="Console2" parent="." instance=ExtResource("2")]
+position = Vector3(4, 0, -3)
+metadata/console_id = "placeholder_console_02"
+
 [node name="Spawn" type="Marker3D" parent="."]
 position = Vector3(0, 0.05, 3)
 
@@ -121,7 +125,7 @@ position = Vector3(0, 0.05, 3)
 offset_left = 24.0
 offset_top = 20.0
 text = "EBON HAWK DESKTOP / M0
-WASD move | Mouse look | Esc release mouse | Click resume
+WASD move | Mouse look | Esc pause | Click resume
 R reset to spawn | Cmd+Q quit
 Placeholder console only; desktop integration starts in M1."
 theme_override_font_sizes/font_size = 20
@@ -137,3 +141,23 @@ offset_top = -12.0
 offset_right = 5.0
 offset_bottom = 12.0
 text = "+"
+
+[node name="PauseScreen" type="CanvasLayer" parent="."]
+layer = 100
+visible = false
+
+[node name="Background" type="ColorRect" parent="PauseScreen"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0, 0, 0, 1)
+
+[node name="Title" type="Label" parent="PauseScreen/Background"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+text = "Paused"
+horizontal_alignment = 1
+vertical_alignment = 1
+theme_override_font_sizes/font_size = 36

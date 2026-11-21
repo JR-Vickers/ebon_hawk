@@ -19,7 +19,7 @@ shading_mode = 0
 material = SubResource("ScreenMaterial")
 size = Vector2(2.0, 1.0)
 
-[node name="Console" type="StaticBody3D"]
+[node name="Console" type="StaticBody3D" groups=["consoles"]]
 metadata/console_id = "placeholder_console_01"
 
 [node name="Base" type="MeshInstance3D" parent="."]

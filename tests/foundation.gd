@@ -20,6 +20,20 @@ func run() -> void:
 	root.add_child(room)
 	var player = room.get_node("Player")
 	await frames(60)
+	var escape := InputEventKey.new()
+	escape.keycode = KEY_ESCAPE
+	escape.pressed = true
+	root.push_input(escape)
+	expect(paused and room.get_node("PauseScreen").visible and not player.can_process(), "Escape pauses physics and shows pause screen")
+	escape.echo = true
+	root.push_input(escape)
+	expect(paused, "Holding Escape keeps the game paused")
+	escape.echo = false
+	escape.pressed = false
+	root.push_input(escape)
+	escape.pressed = true
+	root.push_input(escape)
+	expect(not paused and not room.get_node("PauseScreen").visible and player.navigation_enabled, "Second Escape resumes navigation")
 	expect(player.is_on_floor(), "Spawn must settle on the floor")
 	expect(player.position.distance_to(room.get_node("Spawn").position) < 0.1, "Spawn is clear of geometry")
 	expect(room.get_node("Console").get_meta("console_id") == "placeholder_console_01", "Console ID must remain stable")
