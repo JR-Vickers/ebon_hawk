@@ -1,10 +1,13 @@
 # Godot imports/editor cache; retain authored .uid files.
 .godot/
+.import/
 *.tmp
 *.log
 .DS_Store
 # Dependencies, native output, exports, caches.
 build/
+dist/
+logs/
 .venv/
 __pycache__/
 *.pyc
@@ -16,6 +19,17 @@ export_credentials.cfg
 .env
 .env.*
 !.env.example
-assets/local/
-assets/extracted/
-assets/generated/
+
+# Game assets and derivatives belong on the local machine, including exports.
+/assets/
+# Common KOTOR installation directories and game-specific resource formats.
+GameData/
+chitin.key
+*.bif
+*.erf
+*.rim
+*.mod
+*.mdx
+*.wok
+*.tpc
+*.txi
