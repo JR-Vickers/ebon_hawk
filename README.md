@@ -1,6 +1,6 @@
 # Ebon Hawk Desktop
 
-A Godot placeholder room with first-person movement and one console. M1 capture/input prototype source is implemented, with **user-verified Terminal capture, `pwd` execution, release to navigation, clean re-entry, and working clicks in selected application windows**. The full native extension builds and its Godot smoke check passes. Automated checks pass with the documented local CA-bundle override; the remaining GUI acceptance matrix stays open. See [validation](docs/validation.md). M2 has not started.
+A Godot room with first-person movement and one interactive console for a real macOS application window. Milestone 1 was accepted on 2026-11-20. See the [validation record](docs/validation.md) for live results and automated checks.
 
 ## Launch
 
@@ -20,7 +20,7 @@ During interaction, the target application becomes active behind the floating Go
 
 Under **System Settings → Privacy & Security**, enable **Screen & System Audio Recording** (called Screen Recording on some macOS versions), **Accessibility**, and **Input Monitoring** for the running **Godot** application. The picker has an explicit Request permissions button. Restart Godot after grants and refresh the picker. These permissions belong to the host app, not the dylib or this repository. Do not grant only the standalone `platform_checks` test executable and expect Godot to inherit the grants.
 
-The pointer's local cross is the input location on the console; letterbox/pillarbox clicks are discarded. Only the selected primary window is captured. A separate native menu/popup or file dialog may be absent; a focused-window change releases input instead of silently controlling a different window. Menu/dialog, Spaces, occlusion, and real input behavior are **unverified**. The source state and release reason are shown on screen. Restore minimized sources in macOS, wait for capture to resume, then press E. Reassign closed/unavailable sources with P.
+The pointer's local cross is the input location on the console; letterbox/pillarbox clicks are discarded. Focus changes release input. Press P and choose “Choose task window from this app” to select an exposed dialog or auxiliary window temporarily; press E after its frame appears. In the picker, “Return to assigned source” restores the original exact window if it is still available. Task windows are not saved as assignments. If macOS does not expose or identify a window, it cannot be controlled. Menus, sheets, and individual app workflows remain unverified for M5. Restore minimized sources in macOS, wait for capture to resume, then press E. Reassign closed or unavailable sources with P.
 
 The player starts at `(0, 0.05, 3)`, looking down negative Z at console 01 at `(0, 0, -3)`. The room is 12 × 12 meters with four solid walls. Camera height is 1.65 meters. Adjust `speed` and `mouse_sensitivity` on the Player instance in the inspector.
 
@@ -57,3 +57,5 @@ Keep shared Godot settings in `project.godot` and authored scenes in `scenes/`. 
 `.godot/`, `build/`, native binaries, local configuration, and `assets/local/`, `assets/extracted/`, `assets/generated/` are ignored. Keep user-supplied game files and installation paths there when the asset milestone begins. Authored `.uid` files are retained. No extracted assets, Blender, importer, or export templates are needed for M0.
 
 See [status](docs/status.md), [validation and local acceptance checks](docs/validation.md), and [architecture](docs/architecture.md).
+
+The experimental KOTOR2 ship import and navigation preview are documented in [docs/assets.md](docs/assets.md). The normal `run` command still opens the placeholder room.

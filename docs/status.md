@@ -1,6 +1,6 @@
-# Status — 2026-11-18
+# Status — 2026-11-20
 
-M1 prototype source is implemented in the M0 placeholder. **Terminal capture, typing, Obsidian clipboard shortcuts, and ordinary clicks in selected windows are user-verified on the actual Mac; M1 acceptance remains incomplete.** M2 has not started.
+**M1 complete.** The user accepted all eight one-window criteria on 2026-11-20, confirming release and recovery and correct menu behavior.
 
 Current automated results:
 
@@ -11,8 +11,27 @@ Current automated results:
 
 The certificate startup error was resolved locally using ignored override.cfg with `/etc/ssl/cert.pem`. A reproducible example is in config/macos-ca.example.cfg. TLS verification and strict error detection remain enabled. Dependency download/build and certificate errors are no longer blockers in this workspace.
 
-User GUI results (2026-11-18): PASS for selecting/displaying the real Terminal on the console, E interaction, typing `pwd` and Return with live output, releasing with Right Control or Escape and resuming WASD after clicking Godot, and re-entering without stuck keys/modifiers. The user confirmed all three requested checks. The specific release key used was not identified; F12 and held-button/failure-path cleanup remain untested. This establishes the Terminal path with the room visible, not the whole app matrix.
+Live checks on the user's Mac covered Terminal command output, text editing and held keys, clicks and drags, Chrome scrolling and links, targeting, and release back to navigation with the room visible.
 
-Agent GUI execution limitation: a fresh GUI smoke launch still aborts with exit 134 in this execution environment. An existing crash report points to AppKit/LaunchServices application registration (`_RegisterApplication`, `NSApplication init`), before scene execution. No connected GUI inspection/control tool is available. The user can run the GUI and has confirmed actual Terminal capture/input. Editor and browser workflows, mouse drag/double-click/scroll, resize/movement, menus/dialogs, occlusion, minimization, Spaces and failure-path cleanup remain open. Earlier standalone permission preflights apply only to that test executable; the user successfully enabled capture for the running Godot application.
+See the [final acceptance record](validation.md) for the per-criterion results and earlier diagnostic history.
 
-See [validation.md](validation.md) for current results and the open manual matrix. Preserve M0 behavior; keep M1 open until the real-window workflows pass with the 3D room visible.
+## M2 complete — 2026-11-21
+
+Two placeholder consoles now have separate capture sessions, shared interaction control, saved logical selectors, and quality settings. Automated checks and the native build pass. The user reported that everything works and accepted M2 on 2026-11-21. Detailed individual live test results were not supplied.
+
+## M3 complete — 2026-11-21
+
+Located the KOTOR2 GameData installation and identified layout `003ebo` with 16 room models. The user confirmed the Blender assembly looks accurate. The extraction manifest reports 128 referenced textures/lightmaps and no missing source files. The current export supplies Godot with lightmaps for 899 objects; two objects have missing material inputs. Blender imported 15 walkmesh objects; the sixteenth source walkmesh (`003eboq`) has zero faces. The documented toolchain pins the successfully used Blender 5.3.0 build. The user limited the reproduction requirement to this Mac, where the pipeline was rebuilt.
+
+The user walked through the Godot preview: the ship looks and feels right, walls were mostly solid and doors open, but furniture lacked collision and some materials became translucent with distance. Following additions for furniture, cockpit controls, and the curved chair panel, the user accepted the collision work as complete. Automated checks cover the table, panel, cockpit objects, and doorway clearance. After the transparency fix, the user reported the appearance was much better and accepted the remaining subtle differences from the game for the MVP.
+
+
+## M4 accepted; M5 underway — 2026-11-21
+
+The user reported all requested live console and cross-Space checks passed.
+The next milestone covers native dialogs, popups, source and permission
+failures, and recovery; the separate M5 acceptance matrix remains open.
+
+M5 has a temporary same-process window picker and recovery changes under
+test. Its live workflow and failure matrix is not yet demonstrated, so M5
+remains open.

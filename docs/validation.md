@@ -1,27 +1,31 @@
-# Validation — M0
+# Validation
 
-## M1 checkpoint review — 2026-11-18
+## M1 final acceptance — 2026-11-20
 
-The core one-window interaction works on the user's Mac. The table follows
+The user accepted all eight M1 criteria on 2026-11-20. The table follows
 the eight original acceptance criteria in docs/PLAN.md. Earlier entries
 below preserve the sequence of experiments.
 
 | Original criterion | Result at checkpoint |
 | --- | --- |
-| Editor sentence, selection, copy/paste and undo | Partial. Obsidian Cmd+C/V and ordinary clicking are user-confirmed. The complete TextEdit sequence, including undo, is open. |
-| Browser scroll and link activation | Open. The fixture received scroll events. Chrome scrolling and link activation still need a live check. |
-| Drag-select and release without stuck input | Open. Terminal selection failed before the click fix. A successful selection and release outside the console have yet to be recorded on this build. |
-| Terminal command | Pass. The user ran pwd through the console and saw live output. Held Backspace repeat is a separate reported failure. |
-| Correct clicks after moving or resizing | Open. Automated projection tests pass. Live corner/center checks, resize recovery, and available display scales remain open. |
+| Editor sentence, selection, copy/paste and undo | Pass by user report. The user reported that text editing worked except for held keys, then confirmed the held-key fix. Obsidian Cmd+C/V was also confirmed separately. The editor used for the final check was unspecified. |
+| Browser scroll and link activation | Pass. User confirmed Chrome scrolling and link activation through the console on 2026-11-20. |
+| Drag-select and release without stuck input | Pass. User confirmed drag and release on 2026-11-19. |
+| Terminal command | Pass. The user ran pwd through the console and saw live output. Held J and Backspace repeat are now user-verified. |
+| Correct clicks after moving or resizing | Pass by user report for geometry and targeting on 2026-11-19. Display configurations were unspecified. |
 | Room visible during operation | Pass. User confirmed the Terminal workflow and supplied a view of Discord on the console inside the room. |
-| Release to navigation without held input | Partial. Normal release, WASD, and re-entry pass. Reserved-key variants and exit during a held modifier or drag need live checks. |
-| Document menus, dialogs, minimized windows and Spaces | Open. The fixture context menu worked. TextEdit menu and file dialog, minimization/restore, occlusion and other-Space behavior need observations. |
+| Release to navigation without held input | Pass. The user confirmed all release and recovery items work. Earlier live checks also confirmed normal navigation and re-entry. |
+| Document menus, dialogs, minimized windows and Spaces | Complete by user sign-off. The user confirmed all menus work correctly. Earlier examples include Obsidian Cmd+O and the fixture context menu. The final report did not itemize file-panel, occlusion, minimization or Spaces observations. |
+
+Before the final fix, the live held-key test produced a single character. The session
+log reported a 0.5 s delay, a 1/12 s interval, 66 native repeat posts and
+zero fallback events. The revised delivery path posts ordinary up/down pairs
+for editing-key repeats. The user confirmed the fix on the actual Mac.
 
 The approved validation plan also calls for same-app two-window focus isolation,
 permission loss, app switching and quitting, and failure recovery. The native
 watchdog runs inside Godot. SIGSTOP suspends that thread too, so it cannot
-release held input during a whole-process stop. Main-loop stall recovery
-and whole-process suspension require separate results.
+release held input during a whole-process stop. Recovery after the process resumes is distinct from cleanup during suspension.
 
 At this checkpoint all four development checks passed on macOS 15.7.7 arm64
 with Godot 4.7, and the mouse fixture compiled. The cursor appearance issue
@@ -171,7 +175,7 @@ Candidate app versions read from local Info.plist files: TextEdit **1.20**, Chro
 | Text input sources | Repeat text entry with English and Russian if available; choose the source before entering console mode | NOT RUN |
 | Double click / right click | Word selected; record whether context menu is included and operable | NOT RUN |
 | Drag then move outside console and release | Selection/drag stops; no held target button; bars never receive pointer downs | NOT RUN |
-| Chrome scroll/link | Scroll a page; click an ordinary link through the console; result remains live | NOT RUN |
+| Chrome scroll/link | Scroll a page; click an ordinary link through the console; result remains live | PASS — user confirmed scrolling and link activation on 2026-11-20. |
 | Terminal | Enter `pwd` and Return; correct output in chosen Terminal window | PASS — user verified 2026-11-18, with live console output. Follow-up: single backspace works, held backspace does not repeat; double-click word selection fails; copying text from Terminal fails. See follow-up findings below. |
 | Resize / move / display scale | Release, resize/move source, wait for new live frame, re-enter; clicks land correctly at corners/center on Retina and any other available display | NOT RUN |
 | Source resized externally while interacting | Input releases with reason before stale coordinates are used; explicit E recovery after live frame | NOT RUN |
@@ -291,3 +295,144 @@ desktop cursor remained visible alongside the orange console pointer.
 The cursor visibility change enables background cursor control for the
 Godot connection during interaction and restores the prior setting on
 release. Verify orange-only aiming and return of the normal cursor on exit.
+
+### M2 initial checks — 2026-11-21
+
+- PASS: `python3 tools/dev.py check` (including selector ambiguity and missing-source checks).
+- PASS: `python3 tools/dev.py native`, `native-check`, and `platform-check`.
+- NOT RUN: live dual capture, two windows of one app, input switching, restart restoration, source loss/reopen, and cleanup in the GUI. The command-line preflight reported capture, Accessibility, and Input Monitoring permissions unavailable. These results do not establish M2 acceptance.
+
+### M2 user acceptance — 2026-11-21
+
+The user reported that everything works and requested that M2 be marked complete. This supersedes the open acceptance status above. Individual live scenarios and their results were not separately reported.
+
+### M3 initial asset checks — 2026-11-21
+
+- PASS: Two extraction runs yielded identical hashes for all 177 extracted layout/model/walkmesh/texture files; 16 rooms and 128 texture/lightmap names, no missing sources.
+- PASS: Blender 4.2.23 and KotORBlender `afae04c9172f30ab765891315d9d11224ab57426` imported and exported the layout. Fifteen walkmesh objects were imported. The exporter warned that some vertex colors were not exported.
+- PASS: Headless Godot scene loads and finds collision below the central cabin spawn.
+- NOT RUN: GUI visual inspection, lightmap/material fidelity, full room navigation, wall/door collision coverage, and visual acceptance. The sixteenth source walkmesh (`003eboq`) has zero faces. The exported visual GLB contains 34 images, so the 94 extracted lightmaps are not embedded.
+
+### M3 follow-up — 2026-11-21
+
+- The user confirmed the Blender assembly looks accurate, as recorded in the approved plan. This is separate from Godot acceptance.
+- Extraction reran with 16 rooms and 128 texture/lightmap names, with no missing sources. Blender 5.3.0 and the pinned KotORBlender revision exported 899 lightmapped objects with two recorded exceptions (`Box18`, `Box19`). The required Blender 4.2.23 rebuild has not been repeated.
+- Headless Godot loaded the recorded diffuse textures, lightmaps, and UV2 arrays. The spawn floor, reset transform and camera, a second floor, and one nearby wall were checked. These checks do not render the shader or demonstrate traversable routes.
+- At the `003eboq` layout origin, a vertical collision ray found no surface. The zero-face walkmesh and this ray do not establish whether a floor or wall is needed there; visual and navigation inspection remain open. No authored collision was added.
+- NOT RUN: Godot GUI inspection and walkthrough through cockpit and console-room routes, transparency and lighting review, doorway clearance, and recovery while walking. M3 remains incomplete.
+
+### M3 furniture collision follow-up
+
+- The user walked through the Godot preview and reported that the ship looks and feels like the Ebon Hawk, walls were solid and doors open, but furniture including the central table lacked collision. They also observed distance-dependent translucency and inconsistent lighting; those rendering issues remain open.
+- Inspected the source assembly for named furniture and added a separate collision export for 16 selected meshes. A ray and a player-capsule movement test hit the central hologame table; a ray and capsule movement test cross one central doorway. Existing floor and wall checks still pass.
+- The selected furniture is not a complete automatic classification of the ship, and the additional shapes and other doorway and console approaches have not been walked through in Godot. M3 remains incomplete.
+
+### M3 cockpit collision follow-up
+
+- The user reported that the furniture pass was thorough in their walkthrough; the remaining missing objects were the cockpit chairs, instruments, and pilot controls.
+- Added the cockpit chair, instrument-panel and central-control source meshes to the separate collision export. Headless ray checks hit each selected mesh, and a player-capsule check crosses the cockpit entrance. A live walkthrough of these new additions remains outstanding.
+
+### M3 curved chair panel
+
+- The user confirmed the cockpit additions and identified the curved panel behind three central-room chairs as the last missing collision. Added its side and top source meshes to the furniture export; a headless ray hits the panel, and existing doorway checks remain in place. The panel addition has not yet been checked in a live walkthrough.
+
+### M3 collision acceptance
+
+- The user accepted the collision work as complete after the curved panel addition. This supersedes the open collision status above; the final acceptance did not separately describe a live test of the panel. Rendering and the other M3 work remain open.
+
+### M3 material transparency investigation
+
+- The source TXI metadata identifies several metal wall and floor textures as environment-mapped. Their alpha channels encode reflectivity, but the earlier extraction dropped the metadata and the preview treated that alpha as transparency.
+- Extraction now retains TXI metadata. The rebuilt local material manifest classifies 894 lightmapped objects as opaque and five as blended; the shader also supports cutout and additive modes. The ship check confirms the metal wall classification and a transparent net sample, loads the materials and runs the collision checks. The general project checks pass.
+- The shader still does not reproduce environmental reflections or bump mapping. Texture export color values and lightmap brightness need comparison against the source and Blender; the transparency changes and lighting have not been inspected in the Godot GUI. M3 remains open.
+
+### M3 material acceptance
+
+- The user reviewed the updated preview, reported that it looked much better, and accepted the subtle remaining differences from the game as good enough for the MVP. This supersedes the visual-inspection status above. Environmental reflections and bump mapping remain known fidelity limitations; M3 as a whole remains open.
+
+### M3 toolchain and checklist reconciliation
+
+- Blender 5.3.0 build `02f0899d78e3`, used for the successful local rebuild, is now the documented pin. The earlier 4.2.23 requirement above is superseded.
+- Asset discovery, assembly, extraction/export workflow, material and collision work, and spawn/reset implementation are complete. Spawn/reset has automated coverage; individual live reset observations were not reported.
+- The documented pipeline has not been verified on another local setup. That acceptance criterion remains open.
+
+### M3 completion
+
+- The user restricted the reproduction requirement to this Mac, where the documented pipeline was rebuilt. Cross-computer verification is no longer required. With the user's collision and MVP appearance acceptance and the completed implementation tasks, M3 is complete. Earlier open-status statements are superseded; known material limitations and the lack of a separately reported live reset test remain recorded above.
+
+### Ship development reload
+
+- Headless reload checks pass for the T shortcut, deferral while input is locked, and preservation of player position and camera orientation. Existing ship and general project checks pass.
+- In an isolated project copy, an edited player script was detected and its new code ran in the reloaded scene; a subsequent invalid script was rejected by validation while the preview stayed running. The command was also exercised against a running headless preview.
+- The fullscreen Mac GUI, actual captured-window interaction, graphics-driver shader compilation, and live console-session restoration have not been tested with reload. Native and reload-host changes require restarting the preview.
+
+
+## M4 ship consoles — 2026-11-21
+
+The ship now has cockpit, central, and medbay screen overlays. `python3 tools/dev.py check`, `ship-check`, and `reload-check` pass headlessly. The ship check covers three unique IDs, floor support, approach capsule clearance, line of sight, and aligned camera poses; the placeholder and selector tests remain in the project check. The preview launches with the Mac graphics renderer. This is not evidence of readable text, visual fit, actual window interaction, distinct input ownership, restored real assignments, or a live GUI reload. Those walkthrough results remain pending; M4 is not marked complete.
+
+On 2026-11-21 the user reported that all three consoles and the requested live reload checks work. Detailed individual results were not supplied. The user requested further placement adjustments, beginning with the cockpit console.
+
+
+## Ship audio prototype — 2026-11-21
+
+Extracted the 003EBO music and ambient bed plus 31 distinct clips covering 46 active sound emitters from the local installation. `ship-check` verifies that the generated clips load, emitters instantiate, and M/N toggle the music and ambience; reload validation exercises the scene replacement. Headless checks do not establish audible balance, room transitions, loop quality, or similarity to the original. User listening verification is pending.
+
+
+### M4 interaction regression — 2026-11-21
+
+The user confirmed distinct assignment, monitor switching, readability, and reassignment, but reported that E refused input because Accessibility matching failed. Matching now prefers an exact native window ID when available and otherwise requires the existing unique bounds-and-title match. Failures report an Accessibility error or match counts without recording window titles. The HUD suppresses stale source messages when no console is nearby. Native build, platform checks, and project checks pass; the fix still requires a live retry after restarting the preview.
+
+
+### Cross-Space interaction follow-up (2026-11-21)
+
+Window discovery now checks Accessibility windows, main and focused windows,
+and window-role children. Failed discovery logs only attribute error codes,
+counts and match counts; it does not log titles or content. Compare the first
+(pre-activation) entry with retry entries after activating the fixture. The
+public Accessibility attributes may still omit windows in other Spaces; if
+the selected window cannot be identified and focused, interaction times out.
+No private cross-Space enumeration is used.
+
+Native platform/build, project (including placeholder-room foundation), ship,
+and reload checks passed in this environment. Permission preflight reported
+Screen Recording, Accessibility, and Input Monitoring unavailable to the test
+process. The interactive fixture matrix (same/other Space, ordinary/maximized,
+two windows, clicking, typing, resize, focus loss, release, and ship visibility)
+therefore remains unverified. M4 acceptance remains open.
+
+
+### Live console interaction acceptance — 2026-11-21
+
+The user reported that everything in the requested console verification
+passes, including the cross-Space and two-window checks. Individual app
+versions and observations were not supplied. This completes the previously
+reported live M4 interaction check; it does not establish the separate M5
+native dialog, popup, and failure-recovery matrix.
+
+### M5 recovery follow-up — 2026-11-21
+
+Capture loss, source resize, and other release paths now cancel a pending
+interaction attempt. The retry also checks capture state and required
+permissions before seeking focus. Native build, native smoke, platform,
+project, ship, and reload checks passed; these checks do not simulate a
+capture failure during acquisition. Live failure recovery and native
+dialog/popup workflows remain unverified for M5.
+
+### M5 temporary windows and recovery — 2026-11-21
+
+The task picker includes otherwise-filtered windows belonging to the
+assigned process and does not persist the temporary selection. Return uses
+the original window ID and process, and refuses substitution if unavailable.
+The automated picker test checks the process filter; existing selector tests
+cover missing and ambiguous saved sources and the input ledger covers held
+input release. These are not end-to-end acquisition race tests.
+
+The native build, platform checks, project checks, ship checks, and reload
+checks pass. The platform test process reports all three permissions absent.
+The following separate Mac GUI observations remain **NOT RUN**: editor open
+dialog, editor save dialog, native menu, browser popup, terminal interaction,
+source close/reopen, minimize/restore, resize, focus change, permission denial,
+and permission revocation. For each, record app/version, ship visibility,
+exact input target, and recovery before accepting M5. No app-specific
+exceptions have yet been established.

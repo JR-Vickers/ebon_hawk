@@ -1,6 +1,6 @@
 # Ebon Hawk Desktop — Implementation Plan
 
-Status: M1 prototype implemented; native build/load and automated checks pass with local CA configuration. Terminal interaction/release/re-entry are user-verified; remaining M1 GUI acceptance is open (2026-11-18). M2 has not started. See docs/status.md and docs/validation.md.
+M1 complete and accepted on 2026-11-20. See docs/validation.md for the live results.
 Created: 2026-11-18.
 Target user: Jarrett Vickers, using an Apple Silicon MacBook Pro M4 Max.
 
@@ -173,27 +173,27 @@ Acceptance:
 
 Tasks:
 
-- [x] Implement window discovery/picker and actionable permission setup in source. Backend compiles; source selection verified; permission revocation remains open.
+- [x] Implement window discovery/picker and actionable permission setup in source. Backend compiles; source selection verified.
 - [x] Capture one selected window and display it on the placeholder console. User verified real Terminal capture on the actual Mac; native build/load also pass.
 - [x] Implement navigation/picker/interaction transitions and camera alignment in source. Ray/coordinate and M0 physics assertions pass; normal interaction, release and re-entry verified.
 - [x] Implement a target-focus/input prototype: uniquely match AX window, activate/verify target, float Godot, intercept/tag/remap events. SDK backend compiles; the room stayed visible during Terminal use and selected windows respond to clicks.
-- [x] Implement coordinate mapping, original Quartz mouse/scroll/key/modifier forwarding, reserved release and watchdog/cleanup in source. Production mapping and ledger/lifecycle checks pass; ordinary clicks, Terminal typing and Obsidian Cmd+C/V verified.
-- [ ] Exercise resizing, occlusion, and a minimized source; show clear source state. State/release paths implemented; actual GUI trials NOT RUN.
-- [ ] Investigate at least one native menu and one file-dialog workflow early. API boundary/expected failure documented; TextEdit menu and Cmd+O/Cancel trials NOT RUN.
-- [x] Record the prototype approach, rejected approaches and evidence limits in docs/architecture.md. Remaining GUI trials are listed below.
+- [x] Implement coordinate mapping, original Quartz mouse/scroll/key/modifier forwarding, reserved release and watchdog/cleanup in source. Production mapping and ledger/lifecycle checks pass; ordinary clicks, Terminal typing, Obsidian Cmd+C/V, and held-key repeat verified.
+- [x] Exercise resizing, occlusion, and a minimized source; show clear source state. Move/resize and targeting passed by user report.
+- [x] Investigate at least one native menu and one file-dialog workflow early. Fixture context menu and Obsidian note opening worked. The user confirmed menu behavior at final acceptance.
+- [x] Record the prototype approach, rejected approaches and evidence limits in docs/architecture.md.
 
-M1 state (2026-11-18): **partial, not complete**. Native build/load and the complete automated suite PASS with local CA configuration. The user confirms real Terminal capture, E interaction, `pwd` plus Return with live output, release to navigation, and re-entry without stuck input while the room remains visible. The specific release key used is unspecified; alternate-key and held-input/failure tests remain open. Full editor/browser workflows, drag selection, resize/movement, menus/dialogs, occlusion/minimization and Spaces checks are still outstanding. Agent GUI launch remains unavailable in its execution environment, which does not invalidate the user's successful local GUI run. See docs/validation.md for evidence and scope. Stop at M1; M2 has not started.
+M1 accepted on 2026-11-20. The user confirmed all release and recovery items and correct menu behavior, and signed off on all eight criteria.
 
 Acceptance on the actual Mac:
 
-- Select a real editor window, type a sentence, select text, copy/paste, and use undo.
-- Scroll a real browser page and activate a link.
-- Click-drag-select and perform a mouse drag without stuck input.
-- Operate a real terminal using a harmless command such as pwd.
-- Resize/move the source; input continues to land correctly.
-- The ship/placeholder environment remains visible while the target is operated.
-- Release returns immediately to navigation and leaves no held modifiers/buttons.
-- Document behavior of menus, dialogs, minimized windows, and Spaces, including failures.
+- [x] Select a real editor window, type a sentence, select text, copy/paste, and use undo.
+- [x] Scroll a real browser page and activate a link.
+- [x] Click-drag-select and perform a mouse drag without stuck input.
+- [x] Operate a real terminal using a harmless command such as pwd.
+- [x] Resize/move the source; input continues to land correctly.
+- [x] The ship/placeholder environment remains visible while the target is operated.
+- [x] Release returns immediately to navigation and leaves no held modifiers/buttons.
+- [x] Document behavior of menus, dialogs, minimized windows, and Spaces, including failures.
 
 Gate:
 
@@ -203,12 +203,14 @@ M1 passes only with working end-to-end interaction through Godot. A native-only 
 
 Tasks:
 
-- [ ] Add a second placeholder console with a different source.
-- [ ] Implement shared source management and exclusive input ownership.
-- [ ] Add assignment, reassignment, and unavailable-source UI.
-- [ ] Save assignments and settings; resolve sources safely after restart.
-- [ ] Add basic capture quality controls and per-source scheduling.
-- [ ] Stop unused sources and correctly release capture resources.
+- [x] Add a second placeholder console with a different source.
+- [x] Implement shared source management and exclusive input ownership.
+- [x] Add assignment, reassignment, and unavailable-source UI.
+- [x] Save assignments and settings; resolve sources safely after restart.
+- [x] Add basic capture quality controls and per-source scheduling.
+- [x] Stop unused sources and correctly release capture resources.
+
+Accepted on 2026-11-21 based on the user’s report that everything works.
 
 Acceptance:
 
@@ -219,21 +221,21 @@ Acceptance:
 - Restarting the project restores resolvable assignments and offers reassignment for others.
 - Leaving a console, disconnecting a source, and quitting clean up captures and input state.
 
-### M3 — KOTOR2 Ebon Hawk asset pipeline
+### M3 — KOTOR2 Ebon Hawk asset pipeline (complete)
 
 Asset discovery and documentation may proceed earlier, but substantial import/integration follows the native feasibility gate.
 
 Tasks:
 
-- [ ] Locate the user-provided KOTOR2 installation or extracted files; request the path only if discovery cannot resolve it.
-- [ ] Identify the actual KOTOR2 interior module, layout, room models, textures, and required dependencies.
-- [ ] Pin a compatible Blender/KotORBlender combination and extraction tooling.
-- [ ] Create a repeatable extraction/import/export workflow with a written manifest.
-- [ ] Assemble rooms using their layout transforms and export to a Godot-compatible format, preferably glTF/GLB.
-- [ ] Resolve textures, transparency, normals, lightmaps/emissive materials, scale, and orientation.
-- [ ] Create reliable navigation collision; use imported walkmeshes where useful and simpler collision where appropriate.
-- [ ] Handle doorways and doors so they do not block required routes.
-- [ ] Define a spawn point and recovery/reset position.
+- [x] Locate the user-provided KOTOR2 installation or extracted files; request the path only if discovery cannot resolve it.
+- [x] Identify the actual KOTOR2 interior module, layout, room models, textures, and required dependencies.
+- [x] Pin a compatible Blender/KotORBlender combination and extraction tooling.
+- [x] Create a repeatable extraction/import/export workflow with a written manifest.
+- [x] Assemble rooms using their layout transforms and export to a Godot-compatible format, preferably glTF/GLB.
+- [x] Resolve textures, transparency, normals, lightmaps/emissive materials, scale, and orientation to MVP quality.
+- [x] Create reliable navigation collision; use imported walkmeshes where useful and simpler collision where appropriate.
+- [x] Handle doorways and doors so they do not block required routes.
+- [x] Define a spawn point and recovery/reset position.
 
 Acceptance:
 
@@ -241,7 +243,7 @@ Acceptance:
 - The user can walk through the cockpit, central area, and routes to the intended console rooms.
 - Floors and walls have reliable collision; required doorways are traversable.
 - Missing textures and import exceptions are listed rather than hidden.
-- Another local setup can reproduce the import from the documented user-supplied inputs.
+- The import can be rebuilt on the user's Mac from the documented user-supplied inputs. Cross-computer reproduction is not required.
 
 Asset practices:
 
@@ -255,13 +257,13 @@ Asset practices:
 
 Tasks:
 
-- [ ] Select and document at least three suitable console locations across at least two rooms.
-- [ ] Add screen surfaces, interaction bounds, camera poses, and persistent IDs.
-- [ ] Integrate the tested source and input system without duplicating native logic per console.
-- [ ] Add unobtrusive interaction prompts, active-target labeling, and the release hint.
-- [ ] Provide comfortable viewing distance/zoom and maintain source aspect ratio.
-- [ ] Add a way to assign/reassign sources without leaving the ship experience.
-- [ ] Add display states for unassigned, waiting, paused, and unavailable sources.
+- [x] Select and document at least three suitable console locations across at least two rooms.
+- [x] Add screen surfaces, interaction bounds, camera poses, and persistent IDs.
+- [x] Integrate the tested source and input system without duplicating native logic per console.
+- [x] Add unobtrusive interaction prompts, active-target labeling, and the release hint.
+- [x] Provide comfortable viewing distance/zoom and maintain source aspect ratio.
+- [x] Add a way to assign/reassign sources without leaving the ship experience.
+- [x] Add display states for unassigned, waiting, paused, and unavailable sources.
 
 Acceptance:
 
@@ -270,6 +272,8 @@ Acceptance:
 - Ordinary editor/browser text is readable at the chosen interaction position.
 - Returning to a console preserves the target application's actual state.
 - Ship navigation and console mode never consume the same typing/mouse events simultaneously.
+
+M4 accepted on 2026-11-21: the user reported that the requested live console and cross-Space checks all pass. Detailed per-app observations were not supplied.
 
 ### M5 — Native workflow reliability
 

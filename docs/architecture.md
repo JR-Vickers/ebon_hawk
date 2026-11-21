@@ -34,7 +34,7 @@ Use one Objective-C++ GDExtension with godot-cpp, rather than a Swift helper, IP
 
 CMake fetches the exact binding commit into ignored build output. It produces one debug dylib. Release builds, universal binaries, signing, app export, capture architecture, and input ownership remain future work. The native extension now builds and loads through the Godot smoke check; real GUI acceptance remains partial. See validation.
 
-# M1 prototype — implemented source, native acceptance open
+# M1 prototype — one-window architecture
 
 Recorded 2026-11-18. The M0 description above is historical. M1 now explicitly loads the optional extension from the room's ConsoleController; `native/.gdignore` continues to prevent editor auto-loading and missing-library errors. The standard GDExtension pin is unchanged. Native build/load and automated checks pass. Terminal capture, typing, release and re-entry are user-verified; broader real GUI acceptance remains open.
 
@@ -75,6 +75,16 @@ Right Control (macOS keycode 62) or optional F12 (111), plus Escape, are consume
 A mutex-protected ledger tracks forwarded keys/buttons and modifier snapshots. Release drains it once, synthesizes key/modifier/button ups to the target PID, and discards queued/pending events. The same path covers normal exit, reassign, capture failure, target focus/geometry loss, minimization, timeout, and stop. Repeated release is idempotent. No unpaired pointer-up or key-up is forwarded. Delivery of synthesized ups to actual applications is still unverified; the automated ledger/lifecycle checks do not establish OS delivery.
 
 ## Menus, dialogs, occlusion, and Spaces
+
+M5 adds an explicit temporary task-window picker scoped to the original
+process, including windows hidden by the ordinary picker filter. The saved
+selector is unchanged. Return requires the original window ID and process;
+otherwise the user must choose a source again. Each selection still passes
+the capture and Accessibility identity checks. Discovery, stream errors,
+and frame callbacks are invalidated on source replacement, and acquisition
+checks capture state and permissions before enabling input. Actual inclusion
+and operability of menus, sheets, and dialogs remain to be observed per app;
+the picker cannot control windows macOS does not expose or identify.
 
 Only one primary window is captured. No claim is made that native menus, separate popup windows, open/save panels, or sheets are included. The current strategy can continue only while the retained AX window remains focused; otherwise it releases with a reason. A menu remaining in the same AX window may still be visually missing from the capture. An Open panel becoming a separate focused AX window is expected to trigger release. These are **predictions from the API boundaries, not observed app results**. No menu/file-dialog GUI workflow could be performed here; the validation matrix keeps them NOT RUN.
 
