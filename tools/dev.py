@@ -7,21 +7,23 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
+import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = "4.7.stable.official.5b4e0cb0f"
 CMAKE = "4.4.4"
 
 
-def run(args, *, godot=False):
+def run(args, *, godot=False, godot_timeout=60):
     try:
         result = subprocess.run([str(x) for x in args], cwd=ROOT, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                timeout=60 if godot else None)
+                                timeout=godot_timeout if godot else None)
     except subprocess.TimeoutExpired as error:
         output = error.stdout or b""
         print(output.decode(errors="replace") if isinstance(output, bytes) else output, end="")
-        raise SystemExit("Godot check timed out after 60 seconds; inspect script/runtime errors above.")
+        raise SystemExit(f"Godot check timed out after {godot_timeout} seconds; inspect script/runtime errors above.")
     print(result.stdout, end="", flush=True)
     # Godot can exit zero after a script/resource error.
     if result.returncode or (godot and ("ERROR:" in result.stdout or "SCRIPT ERROR:" in result.stdout)):
@@ -30,8 +32,21 @@ def run(args, *, godot=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["run", "editor", "check", "native", "native-check", "platform-check", "mouse-fixture"])
+    parser.add_argument("command", choices=["run", "run-ship", "reload-ship", "ship-check", "reload-check", "reload-validate", "editor", "check", "native", "native-check", "platform-check", "mouse-fixture"])
     args = parser.parse_args()
+    if args.command == "reload-ship":
+        try:
+            endpoint = json.loads((ROOT / "build/ship-reload.json").read_text())
+            if time.time() - endpoint["heartbeat"] > 5:
+                raise OSError("ship preview heartbeat expired")
+            request = ROOT / "build" / f"ship-reload-request-{endpoint['pid']}"
+            temporary = request.with_name(request.name + "." + uuid.uuid4().hex)
+            temporary.write_text("reload\n")
+            os.replace(temporary, request)
+        except (OSError, KeyError, ValueError, TypeError) as error:
+            raise SystemExit(f"No running ship preview accepts reload requests: {error}")
+        print("Ship reload requested; it will run when the preview is idle.")
+        return
     config_path = ROOT / "config/local.json"
     config = json.loads(config_path.read_text()) if config_path.exists() else {}
     engine = os.environ.get("GODOT") or config.get("godot") or shutil.which("godot") or "/Applications/Godot.app/Contents/MacOS/Godot"
@@ -42,14 +57,30 @@ def main():
     build.mkdir(exist_ok=True)
     (build / ".gdignore").touch()
     base = [engine, "--path", ROOT, "--log-file", build / "godot.log"]
-    if args.command in ("run", "editor"):
-        os.execv(engine, [str(x) for x in base + (["--editor"] if args.command == "editor" else [])])
+    if args.command in ("run", "run-ship", "editor"):
+        os.execv(engine, [str(x) for x in base + (["--editor"] if args.command == "editor" else ["--fullscreen", "res://scenes/ship_reload_host.tscn"] if args.command == "run-ship" else [])])
     elif args.command == "check":
-        for script in ["scripts/player.gd", "scripts/console_mapping.gd", "scripts/console_controller.gd", "tests/foundation.gd", "tests/console_mapping.gd", "tests/native.gd"]:
+        for script in ["scripts/player.gd", "scripts/console_mapping.gd", "scripts/console_controller.gd", "scripts/source_selector.gd", "tests/source_selector.gd", "tests/foundation.gd", "tests/console_mapping.gd", "tests/native.gd"]:
             run(base + ["--headless", "--check-only", "--script", script], godot=True)
         run(base + ["--headless", "--fixed-fps", "60", "--script", "tests/foundation.gd"], godot=True)
         run(base + ["--headless", "--script", "tests/console_mapping.gd"], godot=True)
+        run(base + ["--headless", "--script", "tests/source_selector.gd"], godot=True)
+        run(base + ["--headless", "--script", "tests/window_picker.gd"], godot=True)
         run(base + ["--headless", "--quit-after", "120"], godot=True)
+    elif args.command == "ship-check":
+        if any(not (ROOT / "assets/generated/ship" / name).exists() for name in
+               ("ebon_hawk.glb", "collision.glb", "furniture_collision.glb")):
+            raise SystemExit("Generate ship assets first; see docs/assets.md.")
+        run(base + ["--headless", "--script", "tests/ship.gd"], godot=True, godot_timeout=15)
+        if (ROOT / "assets/generated/ship_audio/manifest.json").exists():
+            run(base + ["--headless", "--script", "tests/ship_audio.gd"], godot=True, godot_timeout=15)
+    elif args.command == "reload-check":
+        run(base + ["--headless", "--script", "tests/ship_reload.gd"], godot=True)
+    elif args.command == "reload-validate":
+        base = [engine, "--path", ROOT, "--log-file", build / "ship-reload-godot.log"]
+        for script in sorted((ROOT / "scripts").rglob("*.gd")):
+            run(base + ["--headless", "--check-only", "--script", script], godot=True, godot_timeout=15)
+        run(base + ["--headless", "--script", "tests/ship.gd"], godot=True, godot_timeout=15)
     elif args.command == "native":
         cmake = config.get("cmake") or shutil.which("cmake")
         if not cmake:

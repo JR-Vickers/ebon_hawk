@@ -1,0 +1,29 @@
+[gd_scene load_steps=3 format=3]
+
+[sub_resource type="StandardMaterial3D" id="ScreenMaterial"]
+albedo_color = Color(0.025, 0.12, 0.16, 1)
+shading_mode = 0
+
+[sub_resource type="QuadMesh" id="ScreenMesh"]
+material = SubResource("ScreenMaterial")
+size = Vector2(1.6, 0.9)
+
+[node name="ShipConsole" type="Node3D" groups=["consoles"]]
+metadata/console_id = "ship_console"
+
+[node name="Screen" type="MeshInstance3D" parent="."]
+mesh = SubResource("ScreenMesh")
+
+[node name="Status" type="Label3D" parent="."]
+position = Vector3(0, 0, 0.01)
+text = "UNASSIGNED\nPress P to choose a window"
+font_size = 32
+pixel_size = 0.002
+modulate = Color(0.4, 0.95, 1, 1)
+outline_size = 0
+
+[node name="ViewPose" type="Marker3D" parent="."]
+position = Vector3(0, 0, 1.8)
+
+[node name="InteractionPoint" type="Marker3D" parent="."]
+position = Vector3(0, -1.5, 1.8)
